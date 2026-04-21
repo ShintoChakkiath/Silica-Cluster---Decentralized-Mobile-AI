@@ -16,34 +16,33 @@ package io.github.shintochakkiath.silicacluster.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-private val MonochromeColorScheme = darkColorScheme(
-    primary = Color.White,
-    secondary = Color.White,
-    tertiary = Color.White,
+private val SilicaColorScheme = darkColorScheme(
+    primary = SilicaLightBlue,
+    secondary = SilicaWhite,
+    tertiary = MatrixGreen,
     background = ObsidianBg,
     surface = ObsidianSurface,
-    onPrimary = Color.Black,
-    onSecondary = Color.Black,
-    onTertiary = Color.Black,
+    onPrimary = SilicaNavy,
+    onSecondary = SilicaNavy,
+    onTertiary = SilicaNavy,
     onBackground = TextPrimary,
     onSurface = TextPrimary,
-    error = Color.White,
-    outline = Color.White,
+    error = AlertRed,
+    outline = TextMuted,
     surfaceVariant = ObsidianCard,
     onSurfaceVariant = TextSecondary
 )
 
 @Composable
 fun SilicaClusterTheme(
-    darkTheme: Boolean = true, // Force Dark theme internally
+    darkTheme: Boolean = true, // We focus on the high-end dark brand theme
     content: @Composable () -> Unit
 ) {
     MaterialTheme(
-        colorScheme = MonochromeColorScheme,
+        colorScheme = SilicaColorScheme,
         typography = Typography,
         content = content
     )

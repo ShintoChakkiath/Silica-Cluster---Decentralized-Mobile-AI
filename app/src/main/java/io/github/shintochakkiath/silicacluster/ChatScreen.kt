@@ -15,6 +15,7 @@
 package io.github.shintochakkiath.silicacluster
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -38,6 +39,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import android.content.Intent
 import android.net.Uri
@@ -51,6 +53,18 @@ import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.ArrowDropDown
 import io.github.shintochakkiath.silicacluster.ui.theme.AlertRed
 import androidx.compose.foundation.lazy.itemsIndexed
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import android.speech.SpeechRecognizer
+import android.speech.RecognizerIntent
+import android.speech.RecognitionListener
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material.icons.filled.Mic
+import android.os.Bundle
 
 fun formatMarkdown(text: String): AnnotatedString {
     return buildAnnotatedString {
@@ -79,8 +93,10 @@ fun ChatScreen(
     currentBridgeUrl: String?,
     activeApiKey: String,
     selectedModel: String?,
+    voiceLanguage: String = "en-US",
     isRealTimeAccess: Boolean = false,
     isServerRunning: Boolean = false,
+    httpTimeoutSec: Int = 30,
     onNavigateToDownloads: () -> Unit = {},
     onStartEngine: (String) -> Unit = {},
     onStopEngine: () -> Unit = {}
@@ -97,8 +113,78 @@ fun ChatScreen(
     var inputText by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("User message received...") }
+    
+    var isRecording by remember { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (!isGranted) {
+            android.widget.Toast.makeText(context, "Microphone permission required for voice input", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val speechRecognizer = remember { SpeechRecognizer.createSpeechRecognizer(context) }
+    
+    val recognizerIntent = remember(voiceLanguage) {
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, voiceLanguage)
+        }
+    }
+
+    val recognitionListener = remember {
+        object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onError(error: Int) {
+                isRecording = false
+            }
+            override fun onResults(results: Bundle?) {
+                isRecording = false
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!matches.isNullOrEmpty()) {
+                    val incoming = matches[0]
+                    inputText = if (inputText.isBlank()) incoming else "$inputText $incoming"
+                }
+            }
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        }
+    }
+
+    LaunchedEffect(speechRecognizer) {
+        speechRecognizer.setRecognitionListener(recognitionListener)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            speechRecognizer.destroy()
+        }
+    }
+
+    val isOfflineMode = !NetworkManager.hasInternet(context)
+    val actualRealTimeAccess = if (isOfflineMode) false else isRealTimeAccess
 
     Column(modifier = Modifier.fillMaxSize()) {
+        if (isOfflineMode && isRealTimeAccess) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFB00020))
+                    .padding(vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "The app is currently on offline mode, please check your network.",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
         // Chat History Scroll View
         LazyColumn(
             state = listState,
@@ -110,13 +196,28 @@ fun ChatScreen(
             
             if (messages.isEmpty()) {
                 item {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            "What can I compute for you?",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.padding(top = 100.dp)
-                        )
+                    Box(modifier = Modifier.fillMaxWidth().padding(top = 120.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            androidx.compose.foundation.Image(
+                                painter = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
+                                contentDescription = null,
+                                modifier = Modifier.size(100.dp).clip(RoundedCornerShape(20.dp))
+                            )
+                            Spacer(Modifier.height(24.dp))
+                            Text(
+                                "What can I compute for you?",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Black
+                            )
+                            Text(
+                                "SILICA CLUSTER",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline,
+                                letterSpacing = 4.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -314,100 +415,170 @@ fun ChatScreen(
                     maxLines = 4
                 )
                 
-                IconButton(
-                    onClick = {
-                        if (inputText.isNotBlank() && !isSending) {
-                            val userText = inputText
-                            inputText = ""
-                            
-                            if (activeSession == null) {
-                                ChatRepository.createNewChat(context)
-                            }
-                            
-                            ChatRepository.addMessageToActive(context, ChatMessage("user", userText))
-                            isSending = true
-                            
-                            scope.launch {
-                                // Auto-scroll down
-                                listState.animateScrollToItem(ChatRepository.sessions.value.find { it.id == ChatRepository.activeSessionId.value }?.messages?.size ?: 0)
+                if (inputText.isNotBlank() || isSending) {
+                    IconButton(
+                        onClick = {
+                            if (inputText.isNotBlank() && !isSending) {
+                                val userText = inputText
+                                inputText = ""
                                 
-                                statusText = "User message received..."
-                                kotlinx.coroutines.delay(400)
+                                if (activeSession == null) {
+                                    ChatRepository.createNewChat(context)
+                                }
                                 
-                                var searchResultsText = ""
-                                var sourceUrls: List<String> = emptyList()
-                                if (isRealTimeAccess) {
-                                    val q = userText.lowercase().trim().replace(Regex("[^a-z0-9 ]"), "")
-                                    val slangs = setOf("hi", "hello", "hey", "yo", "sup", "wassup", "whatsup", "whats up", "what up", "hola", "good morning", "good afternoon", "good evening", "good night", "bye", "goodbye", "thanks", "thank you", "ok", "okay", "cool", "awesome", "lol", "lmao", "haha", "yes", "no", "yup", "nope", "yeah", "nah")
-                                    val isBasicConvo = slangs.contains(q) || q.length < 3
-                                    
-                                    val wantsSearch = if (isBasicConvo) {
-                                        false
-                                    } else {
-                                        statusText = "Analyzing intent..."
-                                        val wordCount = userText.trim().split("\\s+".toRegex()).size
-                                        val shortContext = if (wordCount <= 4) "The query is $wordCount words. If it is slang, a basic question, a greeting, or a simple dictionary word, reply NO. " else ""
-                                        val routePrompt = "User query: \"$userText\"\n${shortContext}Does this query explicitly require looking up extremely recent real-time news, current local weather, or live internet statistics to answer accurately? Reply with ONLY the word YES or NO. Do not explain, do not converse."
-                                        val routeResponse = ChatClient.sendMessage(currentBridgeUrl ?: "", activeApiKey, selectedModel ?: "silica-network", listOf(ChatMessage("user", routePrompt)))
-                                        routeResponse?.content?.contains("YES", ignoreCase = true) == true
+                                ChatRepository.addMessageToActive(context, ChatMessage("user", userText))
+                                isSending = true
+                                
+                                scope.launch {
+                                    try {
+                                        // Auto-scroll down
+                                        listState.animateScrollToItem(ChatRepository.sessions.value.find { it.id == ChatRepository.activeSessionId.value }?.messages?.size ?: 0)
+                                        
+                                        statusText = "User message received..."
+                                        kotlinx.coroutines.delay(400)
+                                        
+                                        var searchResultsText = ""
+                                        var sourceUrls: List<String> = emptyList()
+                                        if (actualRealTimeAccess) {
+                                            val q = userText.lowercase().trim().replace(Regex("[^a-z0-9 ]"), "")
+                                            val slangs = setOf("hi", "hello", "hey", "yo", "sup", "wassup", "whatsup", "whats up", "what up", "hola", "good morning", "good afternoon", "good evening", "good night", "bye", "goodbye", "thanks", "thank you", "ok", "okay", "cool", "awesome", "lol", "lmao", "haha", "yes", "no", "yup", "nope", "yeah", "nah")
+                                            val isBasicConvo = slangs.contains(q) || q.length < 3
+                                            
+                                            var wantsSearch = false
+                                            var searchQuery = userText
+                                            
+                                            if (!isBasicConvo) {
+                                                statusText = "Analyzing conversational intent..."
+                                                val fullSession = ChatRepository.sessions.value.find { it.id == ChatRepository.activeSessionId.value }
+                                                val history = fullSession?.messages?.takeLast(4)?.joinToString("\n") { "${it.role}: ${it.content}" } ?: ""
+                                                
+                                                val routePrompt = """
+Recent Chat History:
+$history
+
+User's latest message: "$userText"
+
+INSTRUCTION: 
+If the user's latest message requires searching the internet for new facts, news, or weather, reply EXACTLY with "SEARCH: [query]". 
+Otherwise, reply EXACTLY with "CHAT".
+""".trimIndent()
+                                                
+                                                val routeMsgs = listOf(
+                                                    ChatMessage("system", "You are an internal router. You must output ONLY the action code, nothing else."),
+                                                    ChatMessage("user", routePrompt)
+                                                )
+                                                val routeResponse = ChatClient.sendMessage(currentBridgeUrl ?: "", activeApiKey, selectedModel ?: "silica-network", routeMsgs, timeoutSec = httpTimeoutSec)
+                                                val routeAns = routeResponse?.content?.trim() ?: ""
+                                                
+                                                if (routeAns.contains("SEARCH:", ignoreCase = true)) {
+                                                    wantsSearch = true
+                                                    searchQuery = routeAns.substringAfter("SEARCH:").trim().removePrefix("[").removeSuffix("]").trim()
+                                                    if (searchQuery.isBlank() || searchQuery == "your query") searchQuery = userText
+                                                    // Clean up any trailing periods or garbage from the router LLM
+                                                    searchQuery = searchQuery.trimEnd('.', '"', '\'')
+                                                }
+                                            }
+                                            
+                                            if (wantsSearch) {
+                                                statusText = "Looking up internet about the subject..."
+                                                val (contextData, links) = WebSearcher.getRealTimeContext(searchQuery) { statusMsg ->
+                                                    statusText = statusMsg
+                                                }
+                                                sourceUrls = links
+                                                if (contextData.isNotBlank()) {
+                                                    val contextPrompt = ContextProgrammingManager.getPromptForQuery(searchQuery)
+                                                    searchResultsText = """
+
+Here is the real-time information you requested from the internet to help answer the question:
+$contextData
+
+Please answer my question using only the information provided above.
+$contextPrompt
+""".trimIndent()
+                                                }
+                                            }
+                                        }
+
+                                        statusText = "LLM model processing the context..."
+                                        kotlinx.coroutines.delay(400)
+                                        val fullSession = ChatRepository.sessions.value.find { it.id == ChatRepository.activeSessionId.value }
+                                        val allMessages = fullSession?.messages?.toList() ?: emptyList()
+                                        
+                                        val apiMessages = mutableListOf<ChatMessage>()
+                                        apiMessages.add(ChatMessage("system", "You are Silica, a helpful and highly intelligent AI assistant. Provide clear, direct, and factual answers."))
+                                        apiMessages.addAll(allMessages)
+                                        
+                                        if (searchResultsText.isNotEmpty() && apiMessages.isNotEmpty()) {
+                                            val last = apiMessages.last()
+                                            apiMessages[apiMessages.size - 1] = ChatMessage(last.role, "${last.content}\n\n$searchResultsText", last.timestamp)
+                                        }
+
+                                        statusText = "Preparing response..."
+                                        val response = ChatClient.sendMessage(
+                                            hostUrl = currentBridgeUrl ?: "",
+                                            apiKey = activeApiKey,
+                                            model = selectedModel ?: "silica-network",
+                                            messages = apiMessages,
+                                            timeoutSec = httpTimeoutSec
+                                        )
+                                        
+                                        if (response != null) {
+                                            val isError = response.content.startsWith("API Error", ignoreCase = true) || 
+                                                          response.content.startsWith("Network Exception", ignoreCase = true) || 
+                                                          response.content.startsWith("LLM Server Not Found", ignoreCase = true) || 
+                                                          response.content.startsWith("Connection Refused", ignoreCase = true) || 
+                                                          response.content.startsWith("Error", ignoreCase = true)
+                                            val finalResponse = if (sourceUrls.isNotEmpty() && !isError) response.copy(sourceUrls = sourceUrls) else response
+                                            ChatRepository.addMessageToActive(context, finalResponse)
+                                        }
+                                        listState.animateScrollToItem(ChatRepository.sessions.value.find { it.id == ChatRepository.activeSessionId.value }?.messages?.size ?: 0)
+                                    } finally {
+                                        isSending = false
+                                        statusText = "User message received..."
                                     }
-                                    
-                                    if (wantsSearch) {
-                                        statusText = "Looking up internet about the subject..."
-                                        val (contextData, links) = WebSearcher.getRealTimeContext(userText)
-                                        sourceUrls = links
-                                        if (contextData.isNotBlank()) {
-                                            searchResultsText = "\n\nCRITICAL SYSTEM INSTRUCTION: Use the following real-time data to answer the user's latest query accurately. Do not refuse to answer if the information is here.\n\n$contextData"
+                                }
+                            }
+                        },
+                        enabled = inputText.isNotBlank() && !isSending
+                    ) {
+                        Icon(
+                            Icons.Default.Send,
+                            contentDescription = "Send",
+                            tint = if (inputText.isNotBlank() && !isSending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .pointerInput(voiceLanguage) {
+                                detectTapGestures(
+                                    onPress = {
+                                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                            isRecording = true
+                                            speechRecognizer.startListening(recognizerIntent)
+                                            try {
+                                                awaitRelease()
+                                            } catch (c: Exception) {
+                                                // gesture canceled
+                                            } finally {
+                                                isRecording = false
+                                                speechRecognizer.stopListening()
+                                            }
+                                        } else {
+                                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                         }
                                     }
-                                }
-
-                                statusText = "LLM model processing the context..."
-                                kotlinx.coroutines.delay(400)
-                                val fullSession = ChatRepository.sessions.value.find { it.id == ChatRepository.activeSessionId.value }
-                                val allMessages = fullSession?.messages?.toList() ?: emptyList()
-                                
-                                val apiMessages = if (allMessages.size > 1) {
-                                    val oldMessages = allMessages.dropLast(1)
-                                    val newMessage = allMessages.last()
-                                    val historyText = oldMessages.joinToString("\n") { 
-                                        "${if (it.role == "user") "User" else "Assistant"}: ${it.content}" 
-                                    }
-                                    val compiledContent = "chats so far [\n$historyText\n]\nthen the new message: ${newMessage.content}$searchResultsText"
-                                    listOf(ChatMessage("user", compiledContent, newMessage.timestamp))
-                                } else {
-                                    if (searchResultsText.isNotEmpty()) {
-                                        val newMessage = allMessages.last()
-                                        listOf(ChatMessage("user", "${newMessage.content}$searchResultsText", newMessage.timestamp))
-                                    } else {
-                                        allMessages
-                                    }
-                                }
-
-                                statusText = "Preparing response..."
-                                val response = ChatClient.sendMessage(
-                                    hostUrl = currentBridgeUrl ?: "",
-                                    apiKey = activeApiKey,
-                                    model = selectedModel ?: "silica-network",
-                                    messages = apiMessages
                                 )
-                                
-                                if (response != null) {
-                                    val finalResponse = if (sourceUrls.isNotEmpty()) response.copy(sourceUrls = sourceUrls) else response
-                                    ChatRepository.addMessageToActive(context, finalResponse)
-                                }
-                                isSending = false
-                                listState.animateScrollToItem(ChatRepository.sessions.value.find { it.id == ChatRepository.activeSessionId.value }?.messages?.size ?: 0)
-                            }
-                        }
-                    },
-                    enabled = inputText.isNotBlank() && !isSending
-                ) {
-                    Icon(
-                        Icons.Default.Send,
-                        contentDescription = "Send",
-                        tint = if (inputText.isNotBlank() && !isSending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                    )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Mic,
+                            contentDescription = "Hold to talk",
+                            tint = if (isRecording) AlertRed else MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
         }

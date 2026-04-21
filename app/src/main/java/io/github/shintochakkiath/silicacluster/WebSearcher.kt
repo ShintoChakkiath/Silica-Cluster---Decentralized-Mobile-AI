@@ -12,6 +12,8 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import java.net.URLEncoder
 
 data class SearchResult(val title: String, val snippet: String, val url: String)
@@ -19,114 +21,175 @@ data class SearchResult(val title: String, val snippet: String, val url: String)
 object WebSearcher {
     private val client = HttpClient(CIO) {
         install(HttpTimeout) {
-            requestTimeoutMillis = 10000
+            requestTimeoutMillis = 6000 // Reduced timeout to prevent long hangs
         }
     }
     
-    suspend fun getRealTimeContext(query: String): Pair<String, List<String>> = withContext(Dispatchers.IO) {
-        var contextText = ""
-        val links = mutableListOf<String>()
+    suspend fun getRealTimeContext(query: String, onStatusUpdate: (String) -> Unit = {}): Pair<String, List<String>> = coroutineScope {
+        val links = java.util.concurrent.CopyOnWriteArrayList<String>()
         
-        // 1. Get Location Context
-        var city = "Unknown"
-        var country = "Unknown"
-        try {
-            val ipData = client.get("https://ipinfo.io/json").bodyAsText()
-            val json = org.json.JSONObject(ipData)
-            city = json.optString("city", "Unknown")
-            country = json.optString("country", "Unknown")
-            contextText += "CURRENT LOCATION OF USER: City: $city, Country: $country. Current Time: ${java.util.Date()}\n"
-        } catch (e: Exception) {
-            e.printStackTrace()
-            contextText += "Current Time: ${java.util.Date()}\n"
+        // 1. Start Location Fetch Concurrently
+        val locationDeferred = async(Dispatchers.IO) {
+            var city = "Unknown"
+            var country = "Unknown"
+            try {
+                val ipData = client.get("https://ipinfo.io/json").bodyAsText()
+                val json = org.json.JSONObject(ipData)
+                city = json.optString("city", "Unknown")
+                country = json.optString("country", "Unknown")
+            } catch (e: Exception) {}
+            Pair(city, country)
         }
 
-        // 2. Weather Specific Override
-        if (query.contains("weather", ignoreCase = true) || query.contains("temperature", ignoreCase = true)) {
-            try {
-                val weatherUrl = if (city != "Unknown" && city.isNotBlank()) "https://wttr.in/${URLEncoder.encode(city, "UTF-8")}?format=j1" else "https://wttr.in/?format=j1"
-                val weatherData = client.get(weatherUrl).bodyAsText()
-                val wJson = org.json.JSONObject(weatherData)
-                val current = wJson.optJSONArray("current_condition")?.optJSONObject(0)
-                if (current != null) {
-                    val temp = current.optString("temp_C")
-                    val desc = current.optJSONArray("weatherDesc")?.optJSONObject(0)?.optString("value")
-                    val humidity = current.optString("humidity")
-                    contextText += "REAL-TIME WEATHER DATA FOR $city: $temp °C, Condition: $desc, Humidity: $humidity%.\n"
-                    links.add("https://wttr.in/${URLEncoder.encode(city, "UTF-8")}")
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        } 
-        
-        // 3. Web Search Fallbacks (only if link is still null, meaning we didn't just fulfill a weather query)
-        if (links.isEmpty()) {
-            try {
-                val searchResults = search(query).take(3)
-                if (searchResults.isNotEmpty()) {
-                    searchResults.forEach { links.add(it.url) }
-                    val snippets = searchResults.mapIndexed { index, it -> "Source ${index + 1}: ${it.title}\nURL: ${it.url}\nInformation: ${it.snippet}" }.joinToString("\n\n")
-                    contextText += "REAL-TIME WEB SEARCH RESULTS:\n$snippets\n\nSYSTEM INSTRUCTION: You MUST format your response as follows:\n1. Open with a brief introductory paragraph summarizing the topic.\n2. Present a bulleted list where each bullet explains one specific piece of information, ending immediately with its inline citation (e.g., [Source 1]).\n3. End with a short concluding paragraph. Do not use run-on sentences."
-                } else {
-                    // Try Google News RSS for live events, war stats, updates
-                    val newsResults = googleNewsSearch(query).take(3)
-                    if (newsResults.isNotEmpty()) {
-                        newsResults.forEach { links.add(it.url) }
-                        val snippets = newsResults.mapIndexed { index, it -> "Source ${index + 1}: ${it.title}\nLink: ${it.url}\nSummary: ${it.snippet}" }.joinToString("\n\n")
-                        contextText += "LATEST LIVE NEWS, STATISTICS & INFORMATION:\n$snippets\n\nSYSTEM INSTRUCTION: You MUST format your response as follows:\n1. Open with a brief introductory paragraph summarizing the current news.\n2. Present a bulleted list where each bullet explains one specific piece of news, ending immediately with its inline citation (e.g., [Source 1]).\n3. End with a short concluding paragraph. Do not use run-on sentences."
+        val isWeather = query.contains("weather", ignoreCase = true) || query.contains("temperature", ignoreCase = true)
+        val isNews = query.contains("news", ignoreCase = true) || query.contains("latest", ignoreCase = true) || query.contains("today", ignoreCase = true)
+
+        var searchResultsText = ""
+
+        // 2. Process Intent
+        if (isWeather) {
+            val (city, _) = locationDeferred.await()
+            val weatherSource = RssManager.sources.value.find { it.url.contains("wttr.in") }
+            if (weatherSource != null) {
+                onStatusUpdate("Looking up ${weatherSource.name}...")
+                try {
+                    val weatherUrl = weatherSource.url.replace("<query>", if (city != "Unknown" && city.isNotBlank()) URLEncoder.encode(city, "UTF-8") else "")
+                    val weatherData = client.get(weatherUrl).bodyAsText()
+                    val wJson = org.json.JSONObject(weatherData)
+                    val current = wJson.optJSONArray("current_condition")?.optJSONObject(0)
+                    if (current != null) {
+                        val temp = current.optString("temp_C")
+                        val desc = current.optJSONArray("weatherDesc")?.optJSONObject(0)?.optString("value")
+                        val humidity = current.optString("humidity")
+                        onStatusUpdate("Processing Information...")
+                        searchResultsText = "REAL-TIME WEATHER DATA FOR $city: $temp °C, Condition: $desc, Humidity: $humidity%.\n"
+                        links.add("https://wttr.in/${URLEncoder.encode(city, "UTF-8")}")
                     } else {
-                        // Try Wikipedia fallback
-                        val wikiUrl = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${URLEncoder.encode(query, "UTF-8")}&utf8=&format=json"
-                        val wikiData = client.get(wikiUrl).bodyAsText()
-                        val wikiJson = org.json.JSONObject(wikiData)
-                        val searchArray = wikiJson.optJSONObject("query")?.optJSONArray("search")
-                        if (searchArray != null && searchArray.length() > 0) {
-                            val firstTitle = searchArray.getJSONObject(0).optString("title")
-                            val firstSnippet = searchArray.getJSONObject(0).optString("snippet").replace(Regex("<[^>]*>"), "")
-                            contextText += "WIKIPEDIA SEARCH RESULT:\nTitle: $firstTitle\nSnippet: $firstSnippet\n"
-                            links.add("https://en.wikipedia.org/wiki/${URLEncoder.encode(firstTitle.replace(" ", "_"), "UTF-8")}")
+                        onStatusUpdate("Did not find any related data.")
+                    }
+                } catch (e: Exception) {
+                    onStatusUpdate("Did not find any related data.")
+                }
+            }
+        } else {
+            // Search in parallel to location
+            val searchDeferred = async(Dispatchers.IO) {
+                var text = ""
+                
+                if (isNews) {
+                    try {
+                        val newsResults = rssSearch(query, onStatusUpdate)
+                        if (newsResults.isNotEmpty()) {
+                            onStatusUpdate("Processing Information...")
+                            newsResults.forEach { links.add(it.url) }
+                            val snippets = newsResults.mapIndexed { index, it -> "Source ${index + 1}: ${it.title}\nLink: ${it.url}\nSummary: ${it.snippet}" }.joinToString("\n\n")
+                            text = "LATEST LIVE NEWS & INFORMATION:\n$snippets"
+                        }
+                    } catch(e: Exception) {}
+                }
+                
+                if (text.isEmpty()) {
+                    try {
+                        val ddgSource = RssManager.sources.value.find { it.url.contains("duckduckgo.com") }
+                        if (ddgSource != null) onStatusUpdate("Looking up ${ddgSource.name}...")
+                        
+                        val ddgResults = search(query).take(4)
+                        if (ddgResults.isNotEmpty()) {
+                            onStatusUpdate("Processing Information...")
+                            ddgResults.forEach { links.add(it.url) }
+                            val snippets = ddgResults.mapIndexed { index, it -> "Source ${index + 1}: ${it.title}\nURL: ${it.url}\nInformation: ${it.snippet}" }.joinToString("\n\n")
+                            text = "REAL-TIME WEB SEARCH RESULTS:\n$snippets"
+                        }
+                    } catch(e: Exception) {}
+                }
+
+                if (text.isEmpty() && !isNews) {
+                    try {
+                        val newsResults = rssSearch(query, onStatusUpdate).take(5)
+                        if (newsResults.isNotEmpty()) {
+                            onStatusUpdate("Processing Information...")
+                            newsResults.forEach { links.add(it.url) }
+                            val snippets = newsResults.mapIndexed { index, it -> "Source ${index + 1}: ${it.title}\nLink: ${it.url}\nSummary: ${it.snippet}" }.joinToString("\n\n")
+                            text = "LATEST LIVE NEWS & INFORMATION:\n$snippets"
+                        }
+                    } catch(e: Exception) {}
+                }
+                
+                if (text.isEmpty()) {
+                    val wikiSource = RssManager.sources.value.find { it.url.contains("wikipedia.org") }
+                    if (wikiSource != null) {
+                        onStatusUpdate("Looking up ${wikiSource.name}...")
+                        try {
+                            val wikiUrl = wikiSource.url.replace("<query>", URLEncoder.encode(query, "UTF-8"))
+                            val wikiData = client.get(wikiUrl).bodyAsText()
+                            val wikiJson = org.json.JSONObject(wikiData)
+                            val searchArray = wikiJson.optJSONObject("query")?.optJSONArray("search")
+                            if (searchArray != null && searchArray.length() > 0) {
+                                onStatusUpdate("Processing Information...")
+                                val firstTitle = searchArray.getJSONObject(0).optString("title")
+                                val firstSnippet = searchArray.getJSONObject(0).optString("snippet").replace(Regex("<[^>]*>"), "")
+                                text = "WIKIPEDIA SEARCH RESULT:\nTitle: $firstTitle\nSnippet: ${firstSnippet}"
+                                links.add("https://en.wikipedia.org/wiki/${URLEncoder.encode(firstTitle.replace(" ", "_"), "UTF-8")}")
+                            } else {
+                                onStatusUpdate("Did not find any related data.")
+                            }
+                        } catch(e: Exception) {
+                            onStatusUpdate("Did not find any related data.")
                         }
                     }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
+                text
             }
+            searchResultsText = searchDeferred.await()
         }
+
+        val (city, country) = locationDeferred.await()
+        val contextText = "CURRENT LOCATION OF USER: City: $city, Country: $country. Current Time: ${java.util.Date()}\n$searchResultsText"
         
-        Pair(contextText, links)
+        Pair(contextText, links.toList())
     }
 
-    suspend fun googleNewsSearch(query: String): List<SearchResult> = withContext(Dispatchers.IO) {
+    suspend fun rssSearch(query: String, onStatusUpdate: (String) -> Unit = {}): List<SearchResult> = withContext(Dispatchers.IO) {
+        val results = mutableListOf<SearchResult>()
         try {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
-            val url = "https://news.google.com/rss/search?q=$encodedQuery&hl=en-US&gl=US&ceid=US:en"
+            val sources = RssManager.sources.value
+            if (sources.isEmpty()) return@withContext emptyList()
             
-            val xml = client.get(url).bodyAsText()
-            val results = mutableListOf<SearchResult>()
-            
-            val itemRegex = Regex("""<item>(.*?)</item>""", RegexOption.DOT_MATCHES_ALL)
-            val items = itemRegex.findAll(xml)
-            
-            for (item in items) {
-                val blockText = item.groupValues[1]
-                val title = Regex("""<title>(.*?)</title>""").find(blockText)?.groupValues?.get(1)?.replace(Regex("<[^>]*>"), "")?.trim() ?: ""
-                val googleLink = Regex("""<link>(.*?)</link>""").find(blockText)?.groupValues?.get(1)?.trim() ?: ""
-                val desc = Regex("""<description>(.*?)</description>""", RegexOption.DOT_MATCHES_ALL).find(blockText)?.groupValues?.get(1)?.replace(Regex("<[^>]*>"), "")?.replace("&nbsp;", " ")?.trim() ?: ""
-                val sourceLink = Regex("""<source.*?url="([^"]+)"""").find(blockText)?.groupValues?.get(1)?.trim()
+            for (source in sources) {
+                if (source.url.contains("duckduckgo.com") || source.url.contains("wikipedia.org") || source.url.contains("wttr.in")) continue
                 
-                val finalLink = if (!sourceLink.isNullOrBlank() && googleLink.isNotBlank()) {
-                    val domain = try { java.net.URI(sourceLink).host.removePrefix("www.") } catch (e: Exception) { "news.google.com" }
-                    "$googleLink#silica_domain=$domain"
-                } else if (googleLink.isNotBlank()) {
-                    googleLink
-                } else {
-                    sourceLink ?: ""
+                onStatusUpdate("Looking up ${source.name}...")
+                try {
+                    val url = source.url.replace("<query>", encodedQuery)
+                    val xml = client.get(url).bodyAsText()
+                    
+                    val itemRegex = Regex("""<item>(.*?)</item>""", RegexOption.DOT_MATCHES_ALL)
+                    val items = itemRegex.findAll(xml)
+                    
+                    var sourceAddedCount = 0
+                    for (item in items) {
+                        val blockText = item.groupValues[1]
+                        val title = Regex("""<title>(.*?)</title>""").find(blockText)?.groupValues?.get(1)?.replace(Regex("<[^>]*>"), "")?.trim() ?: ""
+                        val link = Regex("""<link>(.*?)</link>""").find(blockText)?.groupValues?.get(1)?.trim() ?: ""
+                        val desc = Regex("""<description>(.*?)</description>""", RegexOption.DOT_MATCHES_ALL).find(blockText)?.groupValues?.get(1)?.replace(Regex("<[^>]*>"), "")?.replace("&nbsp;", " ")?.trim() ?: ""
+                        
+                        if (title.isNotBlank()) {
+                            results.add(SearchResult("[${source.name}] $title", desc, link))
+                            sourceAddedCount++
+                        }
+                        if (sourceAddedCount >= 5) break // Limit to top 5 results per source
+                    }
+                    
+                    if (sourceAddedCount == 0) {
+                        onStatusUpdate("Did not find any related data. Trying another source...")
+                    } else {
+                        onStatusUpdate("Processing Information...")
+                    }
+                } catch (e: Exception) {
+                    onStatusUpdate("Did not find any related data. Trying another source...")
+                    e.printStackTrace() // Skip failed sources and continue
                 }
-                if (title.isNotBlank()) {
-                    results.add(SearchResult(title, desc, finalLink))
-                }
-                if (results.size >= 4) break
             }
             results
         } catch (e: Exception) {
@@ -136,14 +199,15 @@ object WebSearcher {
     }
 
     suspend fun search(query: String): List<SearchResult> = withContext(Dispatchers.IO) {
+        val ddgSource = RssManager.sources.value.find { it.url.contains("duckduckgo.com") }
+        if (ddgSource == null) return@withContext emptyList()
+        
         try {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
-            val url = "https://html.duckduckgo.com/html/"
+            val url = ddgSource.url.substringBefore("?") + "?q=$encodedQuery"
             
-            val html = client.post(url) {
+            val html = client.get(url) {
                 header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-                contentType(ContentType.Application.FormUrlEncoded)
-                setBody("q=$encodedQuery")
             }.bodyAsText()
 
             val results = mutableListOf<SearchResult>()

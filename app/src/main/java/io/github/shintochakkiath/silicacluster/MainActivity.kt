@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.History
@@ -186,6 +187,8 @@ class MainActivity : ComponentActivity() {
                 val context = LocalContext.current
                 LaunchedEffect(Unit) {
                     ChatRepository.initialize(context)
+                    RssManager.initialize(context)
+                    ContextProgrammingManager.initialize(context)
                 }
 
                 // Global App State
@@ -193,9 +196,10 @@ class MainActivity : ComponentActivity() {
                 var selectedBridge by remember { mutableStateOf(InternetBridge.Cloudflare_Free) }
                 var isWorkerMode by remember { mutableStateOf(false) }
                 var isServerRunning by remember { mutableStateOf(false) }
-                var isOfflineMode by remember { mutableStateOf(false) }
+                val isOfflineMode = !NetworkManager.hasInternet(context)
                 var isRealTimeAccess by remember { mutableStateOf(true) }
-                var isThisDeviceOnly by remember { mutableStateOf(false) }
+                var voiceLanguage by remember { mutableStateOf("en-US") }
+                var httpTimeoutSec by remember { mutableIntStateOf(300) }
                 
                 val bridgeUrlGlobal by BridgeStateManager.currentBridgeUrl.collectAsState()
                 var userApiHost by remember { mutableStateOf("") }
@@ -217,7 +221,15 @@ class MainActivity : ComponentActivity() {
                     drawerContent = {
                         ModalDrawerSheet(modifier = Modifier.fillMaxWidth(0.85f)) {
                             Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                                Text("SILICA CLUSTER", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, modifier = Modifier.padding(16.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(16.dp)) {
+                                    androidx.compose.foundation.Image(
+                                        painter = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
+                                        contentDescription = "Logo",
+                                        modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Text("SILICA CLUSTER", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                                }
                                 HorizontalDivider()
                                 
                                 val chats by ChatRepository.sessions.collectAsState()
@@ -299,7 +311,17 @@ class MainActivity : ComponentActivity() {
                         containerColor = MaterialTheme.colorScheme.background,
                         topBar = {
                             TopAppBar(
-                                title = { Text("SILICA CLUSTER", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black) },
+                                title = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        androidx.compose.foundation.Image(
+                                            painter = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(24.dp).clip(RoundedCornerShape(4.dp))
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("SILICA CLUSTER", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                                    }
+                                },
                                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                                 navigationIcon = {
                                     IconButton(onClick = { scope.launch { drawerState.open() } }) {
@@ -324,17 +346,19 @@ class MainActivity : ComponentActivity() {
                         ) {
                             composable("chat") {
                                 ChatScreen(
-                                    currentBridgeUrl = if (isOfflineMode || isThisDeviceOnly) "http://127.0.0.1:8081" else userApiHost,
+                                    currentBridgeUrl = "http://127.0.0.1:8081",
                                     activeApiKey = userApiKey,
                                     selectedModel = selectedModel?.name,
+                                    voiceLanguage = voiceLanguage,
                                     isRealTimeAccess = if (isOfflineMode) false else isRealTimeAccess,
                                     isServerRunning = isServerRunning,
+                                    httpTimeoutSec = httpTimeoutSec,
                                     onNavigateToDownloads = { navController.navigate("downloads") { launchSingleTop = true } },
                                     onStartEngine = { modelName ->
                                         val model = ModelDirectory.getModels(context).find { it.name == modelName }
                                         if (model != null) {
                                             selectedModel = model
-                                            startSilicaServer(model, selectedBridge, isWorkerMode, "", isOfflineMode || isThisDeviceOnly)
+                                            startSilicaServer(model, selectedBridge, isWorkerMode, "", isOfflineMode)
                                             isServerRunning = true
                                         }
                                     },
@@ -388,16 +412,16 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("settings") {
                             SettingsScreen(
-                                isOfflineMode = isOfflineMode,
-                                onOfflineModeChange = { isOfflineMode = it },
                                 isRealTimeAccess = isRealTimeAccess,
                                 onRealTimeAccessChange = { isRealTimeAccess = it },
-                                isThisDeviceOnly = isThisDeviceOnly,
-                                onThisDeviceOnlyChange = { isThisDeviceOnly = it },
+                                voiceLanguage = voiceLanguage,
+                                onVoiceLanguageChange = { voiceLanguage = it },
                                 userApiHost = userApiHost,
                                 onUserApiHostChange = { userApiHost = it },
                                 userApiKey = userApiKey,
-                                onUserApiKeyChange = { userApiKey = it }
+                                onUserApiKeyChange = { userApiKey = it },
+                                httpTimeoutSec = httpTimeoutSec,
+                                onHttpTimeoutChange = { httpTimeoutSec = it }
                             )
                         }
                     }
@@ -505,7 +529,11 @@ fun SetupScreen(
             .verticalScroll(rememberScrollState())
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 24.dp)) {
-            Icon(Icons.Default.Hub, contentDescription = null, modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
+            androidx.compose.foundation.Image(
+                painter = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
+                contentDescription = null,
+                modifier = Modifier.size(32.dp).clip(RoundedCornerShape(6.dp))
+            )
             Spacer(Modifier.width(16.dp))
             Text("COMMAND CENTER", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
         }
@@ -700,17 +728,18 @@ fun SetupScreen(
 
 @Composable
 fun SettingsScreen(
-    isOfflineMode: Boolean,
-    onOfflineModeChange: (Boolean) -> Unit,
     isRealTimeAccess: Boolean,
     onRealTimeAccessChange: (Boolean) -> Unit,
-    isThisDeviceOnly: Boolean,
-    onThisDeviceOnlyChange: (Boolean) -> Unit,
+    voiceLanguage: String,
+    onVoiceLanguageChange: (String) -> Unit,
     userApiHost: String,
     onUserApiHostChange: (String) -> Unit,
     userApiKey: String,
-    onUserApiKeyChange: (String) -> Unit
+    onUserApiKeyChange: (String) -> Unit,
+    httpTimeoutSec: Int,
+    onHttpTimeoutChange: (Int) -> Unit
 ) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -726,16 +755,7 @@ fun SettingsScreen(
         GlassCard(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
             Text("NETWORK CONFIGURATION", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 12.dp))
             
-            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(if (isOfflineMode) Icons.Default.WifiOff else Icons.Default.Wifi, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(16.dp))
-                    Text("Offline Mode", modifier = Modifier.weight(1f))
-                    Switch(checked = isOfflineMode, onCheckedChange = onOfflineModeChange)
-                }
-                Text("If offline mode is turned on there will be no real time data access from internet, and can be used without any data, if there are nodes connected to this master device over lan you will still have access to the pooled computation power.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 4.dp))
-            }
-
+            
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
@@ -752,12 +772,40 @@ fun SettingsScreen(
 
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Default.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(16.dp))
-                    Text("This Device Only", modifier = Modifier.weight(1f))
-                    Switch(checked = isThisDeviceOnly, onCheckedChange = onThisDeviceOnlyChange)
+                    Text("Voice Input Language", modifier = Modifier.weight(1f))
+                    
+                    var expanded by remember { mutableStateOf(false) }
+                    val languageMap = mapOf(
+                        "en-US" to "English",
+                        "es-ES" to "Spanish",
+                        "fr-FR" to "French",
+                        "de-DE" to "German",
+                        "zh-CN" to "Chinese",
+                        "hi-IN" to "Hindi",
+                        "ja-JP" to "Japanese",
+                        "ru-RU" to "Russian"
+                    )
+                    Box {
+                        TextButton(onClick = { expanded = true }) {
+                            Text(languageMap[voiceLanguage] ?: "English", color = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        }
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            languageMap.forEach { (code, name) ->
+                                DropdownMenuItem(
+                                    text = { Text(name) },
+                                    onClick = { 
+                                        onVoiceLanguageChange(code)
+                                        expanded = false 
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
-                Text("If this turned on, you will not have an API host and the conversation you have with the LLM will be directly passed into your phone's computation pool.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 4.dp))
+                Text("Select the primary language for voice-to-text recognition.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 4.dp))
             }
         }
         
@@ -777,6 +825,234 @@ fun SettingsScreen(
                 label = { Text("API Key") },
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 singleLine = true
+            )
+            
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                Text("HTTP Connection Timeout: ${httpTimeoutSec}s", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
+                Text("Controls how long the app waits for the LLM to generate a response before giving up. Increase for larger contexts.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(bottom = 8.dp))
+                
+                val timeoutOptions = listOf(120, 300, 420, 600, 900, 1200)
+                val closestIndex = timeoutOptions.indexOfFirst { it >= httpTimeoutSec }.takeIf { it >= 0 } ?: (timeoutOptions.size - 1)
+                var sliderPosition by remember { mutableFloatStateOf(closestIndex.toFloat()) }
+                
+                Slider(
+                    value = sliderPosition,
+                    onValueChange = { sliderPosition = it },
+                    onValueChangeFinished = {
+                        val index = kotlin.math.round(sliderPosition).toInt().coerceIn(0, timeoutOptions.size - 1)
+                        onHttpTimeoutChange(timeoutOptions[index])
+                        sliderPosition = index.toFloat()
+                    },
+                    valueRange = 0f..(timeoutOptions.size - 1).toFloat(),
+                    steps = timeoutOptions.size - 2,
+                    colors = SliderDefaults.colors(
+                        thumbColor = MaterialTheme.colorScheme.primary,
+                        activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                        inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("120s", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    Text("1200s", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                }
+            }
+        }
+        
+        // RSS Sources Section
+        val rssSources by RssManager.sources.collectAsState()
+        var showAddRssDialog by remember { mutableStateOf(false) }
+        
+        GlassCard(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+                Text("RSS SOURCES", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                IconButton(onClick = { showAddRssDialog = true }, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Add, contentDescription = "Add RSS", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Text(
+                "Customize the sources used when answering queries. The top source is prioritized. Note: The more sources you have, the longer the LLM processing time will be.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+            
+            Column {
+                rssSources.forEachIndexed { index, source ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .padding(8.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(source.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Text(source.url, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1)
+                        }
+                        
+                        Row {
+                            if (index > 0) {
+                                IconButton(onClick = { RssManager.moveSourceUp(context, source.id) }, modifier = Modifier.size(28.dp)) {
+                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up", tint = MaterialTheme.colorScheme.primary)
+                                }
+                            } else {
+                                Spacer(modifier = Modifier.size(28.dp))
+                            }
+                            if (index < rssSources.size - 1) {
+                                IconButton(onClick = { RssManager.moveSourceDown(context, source.id) }, modifier = Modifier.size(28.dp)) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down", tint = MaterialTheme.colorScheme.primary)
+                                }
+                            } else {
+                                Spacer(modifier = Modifier.size(28.dp))
+                            }
+                            IconButton(onClick = { RssManager.removeSource(context, source.id) }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = AlertRed)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (showAddRssDialog) {
+            var newName by remember { mutableStateOf("") }
+            var newUrl by remember { mutableStateOf("") }
+            
+            AlertDialog(
+                onDismissRequest = { showAddRssDialog = false },
+                title = { Text("Add RSS Source") },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = newName,
+                            onValueChange = { newName = it },
+                            label = { Text("Source Name (e.g. BBC News)") },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        )
+                        OutlinedTextField(
+                            value = newUrl,
+                            onValueChange = { newUrl = it },
+                            label = { Text("RSS URL") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text("Tip: Use <query> in the URL to insert the search term dynamically, or just provide a standard static RSS feed link.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 8.dp))
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        if (newName.isNotBlank() && newUrl.isNotBlank()) {
+                            RssManager.addSource(context, newName, newUrl)
+                            showAddRssDialog = false
+                        }
+                    }) {
+                        Text("Add Source")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAddRssDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        // Context Response Programming Section
+        val contextPrompts by ContextProgrammingManager.prompts.collectAsState()
+        var showAddPromptDialog by remember { mutableStateOf(false) }
+        var editingPrompt by remember { mutableStateOf<ContextPrompt?>(null) }
+        
+        GlassCard(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+                Text("LLM CONTEXT RESPONSE PROGRAMMING", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                IconButton(onClick = { editingPrompt = null; showAddPromptDialog = true }, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Context Prompt", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Text(
+                "Program how the LLM should respond for different contexts (e.g., News, Weather). Enter keywords separated by commas to trigger the format automatically.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+            
+            Column {
+                contextPrompts.forEach { prompt ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .padding(8.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(prompt.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Text(if (prompt.keywords.isBlank()) "Fallback (No keywords)" else prompt.keywords, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            Text(prompt.prompt, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 2)
+                        }
+                        
+                        Row {
+                            IconButton(onClick = { editingPrompt = prompt; showAddPromptDialog = true }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary)
+                            }
+                            IconButton(onClick = { ContextProgrammingManager.removePrompt(context, prompt.id) }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = AlertRed)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (showAddPromptDialog) {
+            var pTitle by remember { mutableStateOf(editingPrompt?.title ?: "") }
+            var pKeywords by remember { mutableStateOf(editingPrompt?.keywords ?: "") }
+            var pPrompt by remember { mutableStateOf(editingPrompt?.prompt ?: "") }
+            
+            AlertDialog(
+                onDismissRequest = { showAddPromptDialog = false },
+                title = { Text(if (editingPrompt == null) "Add Context Programming" else "Edit Context Programming") },
+                text = {
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        OutlinedTextField(
+                            value = pTitle,
+                            onValueChange = { pTitle = it },
+                            label = { Text("Context Title (e.g. Sports)") },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        )
+                        OutlinedTextField(
+                            value = pKeywords,
+                            onValueChange = { pKeywords = it },
+                            label = { Text("Keywords (comma separated)") },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        )
+                        OutlinedTextField(
+                            value = pPrompt,
+                            onValueChange = { pPrompt = it },
+                            label = { Text("Response Format Instruction") },
+                            modifier = Modifier.fillMaxWidth().height(150.dp),
+                            maxLines = 10
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        if (pTitle.isNotBlank() && pPrompt.isNotBlank()) {
+                            ContextProgrammingManager.addOrUpdatePrompt(context, editingPrompt?.id, pTitle, pKeywords, pPrompt)
+                            showAddPromptDialog = false
+                        }
+                    }) {
+                        Text("Save")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAddPromptDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
             )
         }
     }
@@ -1536,6 +1812,7 @@ fun ModelDetailsDialog(model: LLMModel, onDismiss: () -> Unit, activeDownloads: 
                         ModelDetailRow("Model Tier", model.tier)
                         ModelDetailRow("Target Workload", model.useCase)
                         ModelDetailRow("Asset Footprint", model.totalSize)
+                        ModelDetailRow("Capabilities", model.capabilities.joinToString(", "))
                     }
                 }
                 
@@ -1618,6 +1895,9 @@ fun BridgeDropdown(selectedBridge: InternetBridge, onBridgeSelected: (InternetBr
             }
         }
         
+        if (selectedBridge == InternetBridge.Cloudflare_Free) {
+            Text("Note: The free Cloudflare API host has a fixed timeout of 120 sec. If you need longer processing time for large context tasks, please select another API host.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 4.dp))
+        }
         if (selectedBridge.requiresToken) {
             Spacer(modifier = Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {

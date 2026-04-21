@@ -85,17 +85,25 @@ object ChatRepository {
         val activeIndex = currentSessions.indexOfFirst { it.id == activeId }
         if (activeIndex != -1) {
             val session = currentSessions[activeIndex]
-            session.messages.add(message)
-            session.timestamp = System.currentTimeMillis()
+            val newMessages = session.messages.toMutableList()
+            newMessages.add(message)
             
             // Auto-generate title from first user message
-            if (session.messages.count { it.role == "user" } == 1 && session.title == "New Chat") {
-                session.title = message.content.take(30) + if (message.content.length > 30) "..." else ""
+            val newTitle = if (newMessages.count { it.role == "user" } == 1 && session.title == "New Chat") {
+                message.content.take(30) + if (message.content.length > 30) "..." else ""
+            } else {
+                session.title
             }
+            
+            val newSession = session.copy(
+                messages = newMessages,
+                timestamp = System.currentTimeMillis(),
+                title = newTitle
+            )
             
             // Bring to top
             currentSessions.removeAt(activeIndex)
-            currentSessions.add(0, session)
+            currentSessions.add(0, newSession)
             
             _sessions.value = currentSessions.sortedWith(compareByDescending<ChatSession> { it.isPinned }.thenByDescending { it.timestamp })
             saveToFileAsync(context)
@@ -117,8 +125,10 @@ object ChatRepository {
         val currentSessions = _sessions.value.toMutableList()
         val sessionIndex = currentSessions.indexOfFirst { it.id == id }
         if (sessionIndex != -1) {
-            val session = currentSessions[sessionIndex]
-            session.messages.subList(messageIndex, session.messages.size).clear()
+            val oldSession = currentSessions[sessionIndex]
+            val newMessages = oldSession.messages.subList(0, messageIndex).toMutableList()
+            val newSession = oldSession.copy(messages = newMessages)
+            currentSessions[sessionIndex] = newSession
             _sessions.value = currentSessions.toList() // Trigger state update
             saveToFileAsync(context)
         }

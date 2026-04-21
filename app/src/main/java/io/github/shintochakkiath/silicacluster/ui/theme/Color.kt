@@ -16,40 +16,45 @@ package io.github.shintochakkiath.silicacluster.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Obsidian Base
-val ObsidianBg = Color(0xFF000000) // Pure black background
-val ObsidianSurface = Color(0xFF080808) // Very dark for surface
-val ObsidianCard = Color(0xFF141414) // Different black for boxes/cards
+// Silica Cluster Branding
+val SilicaNavy = Color(0xFF04162E)       // Deep navy from logo
+val SilicaNavyDark = Color(0xFF020B17)   // Even darker for background
+val SilicaNavySurface = Color(0xFF0A1F3D) // Lighter navy for surfaces
+val SilicaLightBlue = Color(0xFF89CFF0)  // Light blue from logo nodes
+val SilicaWhite = Color(0xFFF0F8FF)     // Off-white from logo nodes
 
-// Neons & Accents -> All mapped to White
-val NeonCyan = Color(0xFFFFFFFF)
-val CyberPurple = Color(0xFFFFFFFF)
-val MatrixGreen = Color(0xFFFFFFFF)
-val AlertRed = Color(0xFFFFFFFF)
-val SoftAlertRed = Color(0xFFFFFFFF)
+// Obsidian Base (Keeping for logic but updated to brand feel)
+val ObsidianBg = SilicaNavyDark         // Using navy dark instead of pure black
+val ObsidianSurface = SilicaNavySurface
+val ObsidianCard = Color(0xFF0E284D)
 
-// Soft Accents (Light Mode) -> Mapped to White
-val SoftNeonCyan = Color(0xFFFFFFFF)
-val SoftMatrixGreen = Color(0xFFFFFFFF)
-val SoftCyberPurple = Color(0xFFFFFFFF)
+// Neons & Accents -> Mapped to Brand Light Blue and White
+val NeonCyan = SilicaLightBlue
+val CyberPurple = Color(0xFF9EA6F0)      // Soft purple/blue blend
+val MatrixGreen = Color(0xFF6DE8C3)      // Teal variant for status
+val AlertRed = Color(0xFFFF5E5E)         // Soft alert red
+val SoftAlertRed = Color(0xFFFF8585)
 
-// Legacy / Support
-val ObsidianLight = Color(0xFF000000)
-val ObsidianLightSurface = Color(0xFF080808)
-val ObsidianLightCard = Color(0xFF141414)
+// Soft Accents
+val SoftNeonCyan = SilicaLightBlue.copy(alpha = 0.7f)
+val SoftMatrixGreen = Color(0xFF6DE8C3).copy(alpha = 0.7f)
+val SoftCyberPurple = Color(0xFF9EA6F0).copy(alpha = 0.7f)
 
 // Text
-// Text (Dark Mode)
-val TextPrimary = Color(0xFFFFFFFF)
-val TextSecondary = Color(0xFFB3B3B3) // Light grey
-val TextMuted = Color(0xFF808080)
+val TextPrimary = SilicaWhite
+val TextSecondary = Color(0xFFB0C4DE)    // Light Steel Blue for secondary text
+val TextMuted = Color(0xFF708090)        // Slate Gray for muted text
 
-// Text (Light Mode)
-val LightTextPrimary = Color(0xFFFFFFFF)
-val LightTextSecondary = Color(0xFFB3B3B3)
-val LightTextMuted = Color(0xFF808080)
+// Light Mode variants (keeping if needed)
+val LightTextPrimary = Color(0xFF04162E)
+val LightTextSecondary = Color(0xFF334B6B)
+val LightTextMuted = Color(0xFF5A7596)
 
-// Standard Purples (keeping for compat if needed, but we'll use our own)
-val Purple80 = Color(0xFFFFFFFF)
-val PurpleGrey80 = Color(0xFFCCCCCC)
-val Pink80 = Color(0xFFFFFFFF)
+// Legacy / Support
+val ObsidianLight = Color(0xFFF8FAFC)
+val ObsidianLightSurface = Color(0xFFF1F5F9)
+val ObsidianLightCard = Color(0xFFE2E8F0)
+
+val Purple80 = SilicaLightBlue
+val PurpleGrey80 = TextSecondary
+val Pink80 = SilicaWhite

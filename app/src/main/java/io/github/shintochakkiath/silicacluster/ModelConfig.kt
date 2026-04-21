@@ -25,20 +25,21 @@ data class LLMModel(
     val useCase: String,
     val tier: String,
     val totalSize: String, // New field for UI display
-    val downloadUrl: String = "" 
+    val downloadUrl: String = "",
+    val capabilities: List<String> = listOf("Text-to-Text")
 )
 
 object ModelDirectory {
     private val defaultModels = listOf(
-        LLMModel("Danube 3 500M", "500 Million", "~0.6 GB", "Ultra-fast chatbots, basic intent detection.", "Nano", "288 MB", "https://huggingface.co/Edge-Quant/h2o-danube3-500m-chat-Q4_K_M-GGUF/resolve/main/h2o-danube3-500m-chat-q4_k_m.gguf"),
-        LLMModel("Qwen 2.5 0.5B", "500 Million", "~0.7 GB", "Best-in-class tiny model for logic/multilingual.", "Nano", "351 MB", "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"),
-        LLMModel("Llama 3.2 1B", "1 Billion", "~1.1 GB", "The \"Standard\" for budget phones. Fast & reliable.", "Lite", "638 MB", "https://huggingface.co/hugging-quants/Llama-3.2-1B-Instruct-Q4_K_M-GGUF/resolve/main/llama-3.2-1b-instruct-q4_k_m.gguf"),
-        LLMModel("Gemma 2 2B", "2.6 Billion", "~1.9 GB", "High-quality creative writing and prose.", "Efficient", "1.6 GB", "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf"),
-        LLMModel("Llama 3.2 3B", "3.2 Billion", "~2.4 GB", "Recommended. Best intelligence-to-RAM ratio.", "Standard", "2.0 GB", "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
-        LLMModel("Phi-3.5 Mini", "3.8 Billion", "~2.6 GB", "Reasoning, math, and logic-heavy tasks.", "Standard", "2.2 GB", "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf"),
-        LLMModel("Qwen 2.5 Coder 3B", "3 Billion", "~2.3 GB", "Python scripts, debugging, and code generation.", "Specialist", "1.9 GB", "https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf"),
-        LLMModel("Llama 3.1 8B", "8 Billion", "~5.1 GB", "Advanced reasoning. (Needs 8GB+ phone).", "Power", "5.1 GB", "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"),
-        LLMModel("Mistral Nemo 12B", "12 Billion", "~8.2 GB", "Near-human intelligence. (Cluster Only).", "Elite", "7.7 GB", "https://huggingface.co/bartowski/Mistral-Nemo-Instruct-2407-GGUF/resolve/main/Mistral-Nemo-Instruct-2407-Q4_K_M.gguf")
+        LLMModel("Danube 3 500M", "500 Million", "~0.6 GB", "Ultra-fast chatbots, basic intent detection.", "Nano", "288 MB", "https://huggingface.co/Edge-Quant/h2o-danube3-500m-chat-Q4_K_M-GGUF/resolve/main/h2o-danube3-500m-chat-q4_k_m.gguf", listOf("Text-to-Text")),
+        LLMModel("Qwen 2.5 0.5B", "500 Million", "~0.7 GB", "Best-in-class tiny model for logic/multilingual.", "Nano", "351 MB", "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf", listOf("Text-to-Text")),
+        LLMModel("Llama 3.2 1B", "1 Billion", "~1.1 GB", "The \"Standard\" for budget phones. Fast & reliable.", "Lite", "638 MB", "https://huggingface.co/hugging-quants/Llama-3.2-1B-Instruct-Q4_K_M-GGUF/resolve/main/llama-3.2-1b-instruct-q4_k_m.gguf", listOf("Text-to-Text")),
+        LLMModel("Gemma 2 2B", "2.6 Billion", "~1.9 GB", "High-quality creative writing and prose.", "Efficient", "1.6 GB", "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf", listOf("Text-to-Text")),
+        LLMModel("Llama 3.2 3B", "3.2 Billion", "~2.4 GB", "Recommended. Best intelligence-to-RAM ratio.", "Standard", "2.0 GB", "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf", listOf("Text-to-Text")),
+        LLMModel("Phi-3.5 Mini", "3.8 Billion", "~2.6 GB", "Reasoning, math, and logic-heavy tasks.", "Standard", "2.2 GB", "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf", listOf("Text-to-Text", "Code Generation")),
+        LLMModel("Qwen 2.5 Coder 3B", "3 Billion", "~2.3 GB", "Python scripts, debugging, and code generation.", "Specialist", "1.9 GB", "https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf", listOf("Text-to-Text", "Code Generation")),
+        LLMModel("Llama 3.1 8B", "8 Billion", "~5.1 GB", "Advanced reasoning. (Needs 8GB+ phone).", "Power", "5.1 GB", "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf", listOf("Text-to-Text")),
+        LLMModel("Mistral Nemo 12B", "12 Billion", "~8.2 GB", "Near-human intelligence. (Cluster Only).", "Elite", "7.7 GB", "https://huggingface.co/bartowski/Mistral-Nemo-Instruct-2407-GGUF/resolve/main/Mistral-Nemo-Instruct-2407-Q4_K_M.gguf", listOf("Text-to-Text"))
     )
 
     fun getModels(context: Context): List<LLMModel> {

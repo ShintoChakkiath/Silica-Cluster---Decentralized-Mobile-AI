@@ -26,7 +26,8 @@ object ChatClient {
         hostUrl: String,
         apiKey: String,
         model: String,
-        messages: List<ChatMessage>
+        messages: List<ChatMessage>,
+        timeoutSec: Int = 300
     ): ChatMessage? = withContext(Dispatchers.IO) {
         try {
             if (hostUrl.isBlank()) return@withContext ChatMessage("assistant", "No LLM Server Initiated, please configure settings.")
@@ -55,7 +56,7 @@ object ChatClient {
             }
             connection.doOutput = true
             connection.connectTimeout = 30000 // 30s
-            connection.readTimeout = 120000 // 120s inference wait
+            connection.readTimeout = timeoutSec * 1000 // configurable inference wait
 
             // Build request payload
             val payload = JSONObject()
@@ -95,6 +96,7 @@ object ChatClient {
             payload.put("messages", messagesArray)
 
             val outBytes = payload.toString().toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(outBytes.size)
             connection.outputStream.write(outBytes)
             connection.outputStream.flush()
             connection.outputStream.close()

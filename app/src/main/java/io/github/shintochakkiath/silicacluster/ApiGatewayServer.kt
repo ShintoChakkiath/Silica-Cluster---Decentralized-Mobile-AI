@@ -33,7 +33,7 @@ import io.ktor.server.engine.ApplicationEngine
 import io.ktor.server.request.header
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receiveChannel
-import io.ktor.server.request.receiveText
+import io.ktor.server.request.receive
 import io.ktor.server.request.uri
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytesWriter
@@ -88,13 +88,14 @@ class ApiGatewayServer {
 
         for (attempt in 1..maxRetries) {
             try {
-                val bodyText = if (!isRetriable) {
+                val bodyBytes = if (!isRetriable) {
                     try {
-                        val text = call.receiveText()
+                        val bytes = call.receive<ByteArray>()
+                        val text = String(bytes, Charsets.UTF_8)
                         if (text.isNotBlank()) ActivityLogger.logUserRequest(text)
-                        text
-                    } catch(e: Exception) { "" }
-                } else ""
+                        bytes
+                    } catch(e: Exception) { ByteArray(0) }
+                } else ByteArray(0)
 
                 val proxyResponse = httpClient.request(targetUrl) {
                     method = call.request.httpMethod
@@ -109,8 +110,8 @@ class ApiGatewayServer {
                         }
                     }
                     
-                    if (!isRetriable && bodyText.isNotEmpty()) {
-                        setBody(bodyText)
+                    if (!isRetriable && bodyBytes.isNotEmpty()) {
+                        setBody(bodyBytes)
                     }
                 }
 
