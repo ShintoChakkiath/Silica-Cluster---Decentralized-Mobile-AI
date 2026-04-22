@@ -171,8 +171,19 @@ object WebSearcher {
                     for (item in items) {
                         val blockText = item.groupValues[1]
                         val title = Regex("""<title>(.*?)</title>""").find(blockText)?.groupValues?.get(1)?.replace(Regex("<[^>]*>"), "")?.trim() ?: ""
-                        val link = Regex("""<link>(.*?)</link>""").find(blockText)?.groupValues?.get(1)?.trim() ?: ""
+                        var link = Regex("""<link>(.*?)</link>""").find(blockText)?.groupValues?.get(1)?.trim() ?: ""
                         val desc = Regex("""<description>(.*?)</description>""", RegexOption.DOT_MATCHES_ALL).find(blockText)?.groupValues?.get(1)?.replace(Regex("<[^>]*>"), "")?.replace("&nbsp;", " ")?.trim() ?: ""
+                        
+                        // Extract actual source domain for Google News feeds
+                        val sourceUrlMatch = Regex("""<source url="([^"]+)"""").find(blockText)
+                        if (sourceUrlMatch != null && link.contains("news.google.com")) {
+                            try {
+                                val sourceHost = java.net.URI(sourceUrlMatch.groupValues[1]).host?.removePrefix("www.")
+                                if (sourceHost != null) {
+                                    link = "$link#silica_domain=$sourceHost"
+                                }
+                            } catch (e: Exception) {}
+                        }
                         
                         if (title.isNotBlank()) {
                             results.add(SearchResult("[${source.name}] $title", desc, link))

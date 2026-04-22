@@ -237,7 +237,21 @@ class MainActivity : ComponentActivity() {
                                 val visibleChats = chats.filter { it.messages.isNotEmpty() }
                                 var chatLimit by remember { mutableIntStateOf(5) }
                                 
-                                Text("Previous Chats", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(16.dp))
+                                NavigationDrawerItem(
+                                    label = { Text("New Chat") },
+                                    selected = false,
+                                    onClick = { 
+                                        ChatRepository.createNewChat(context)
+                                        navController.navigate("chat") { launchSingleTop = true }
+                                        scope.launch { drawerState.close() }
+                                    },
+                                    icon = { Icon(Icons.Default.Add, null) },
+                                    modifier = Modifier.padding(horizontal = 12.dp)
+                                )
+                                
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                                
+                                Text("Previous Chats", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                                 visibleChats.take(chatLimit).forEach { chat ->
                                     NavigationDrawerItem(
                                         label = { Text(chat.title, maxLines = 1) },
@@ -302,6 +316,47 @@ class MainActivity : ComponentActivity() {
                                     icon = { Icon(Icons.Default.Settings, null) },
                                     modifier = Modifier.padding(horizontal = 12.dp)
                                 )
+                                
+                                var showAboutDialog by remember { mutableStateOf(false) }
+                                NavigationDrawerItem(
+                                    label = { Text("About") },
+                                    selected = false,
+                                    onClick = { showAboutDialog = true; scope.launch { drawerState.close() } },
+                                    icon = { Icon(Icons.Default.Info, null) },
+                                    modifier = Modifier.padding(horizontal = 12.dp)
+                                )
+                                
+                                if (showAboutDialog) {
+                                    AlertDialog(
+                                        onDismissRequest = { showAboutDialog = false },
+                                        title = { Text("About Silica Cluster") },
+                                        text = {
+                                            Column {
+                                                Text("Version 1.0.0", style = MaterialTheme.typography.bodyMedium)
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                Text("Open Source License: GNU Affero General Public License v3.0", style = MaterialTheme.typography.bodySmall)
+                                                Spacer(modifier = Modifier.height(16.dp))
+                                                Text("If you find this project interesting or useful, please consider giving us a star on GitHub!", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                            }
+                                        },
+                                        confirmButton = {
+                                            Button(onClick = {
+                                                val i = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/ShintoChakkiath/Silica-Cluster---Decentralized-Mobile-AI"))
+                                                context.startActivity(i)
+                                                showAboutDialog = false
+                                            }) {
+                                                Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                Spacer(Modifier.width(8.dp))
+                                                Text("Star on GitHub")
+                                            }
+                                        },
+                                        dismissButton = {
+                                            TextButton(onClick = { showAboutDialog = false }) {
+                                                Text("Close")
+                                            }
+                                        }
+                                    )
+                                }
                             }
                         }
                     }

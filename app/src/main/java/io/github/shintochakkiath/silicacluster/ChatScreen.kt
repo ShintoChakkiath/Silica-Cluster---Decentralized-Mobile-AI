@@ -205,7 +205,7 @@ fun ChatScreen(
                             )
                             Spacer(Modifier.height(24.dp))
                             Text(
-                                "What can I compute for you?",
+                                "How can I help you today?",
                                 style = MaterialTheme.typography.titleLarge,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Black
@@ -404,7 +404,7 @@ fun ChatScreen(
                     value = inputText,
                     onValueChange = { inputText = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Message Silica...") },
+                    placeholder = { Text("Message LLM...") },
                     shape = RoundedCornerShape(24.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
