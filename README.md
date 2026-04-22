@@ -1,4 +1,6 @@
-# Silica-Cluster---Decentralized-Mobile-AI
+# Silica Cluster-Decentralized Mobile AI 
+<img src = "/logo.png" width = "100" >
+
 SilicaCluster is an open-source (AGPLv3) application designed to turn Android devices into nodes for a decentralized, local AI infrastructure . Built as a true private alternative to centralized AI services, this app allows you to run open-source Large Language Models (LLMs) locally on your phone or distributed across a cluster of devices.
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
@@ -207,9 +209,7 @@ o	Requirement: Always use active cooling (a fan) if running a cluster node for m
 Screenshots
 
 
-<img src = "/Screenshot_2026-04-22-16-51-47-199_io.github.shintochakkiath.silicacluster.jpg" width = "250" >
-<img src = "/Screenshot_2026-04-22-16-52-00-977_io.github.shintochakkiath.silicacluster.jpg" width = "250" >
-<img src = "/Screenshot_2026-04-22-16-52-08-737_io.github.shintochakkiath.silicacluster.jpg" width = "250" >
+<img src = "/Screenshot_2026-04-22-16-51-47-199_io.github.shintochakkiath.silicacluster.jpg" width = "250" >   <img src = "/Screenshot_2026-04-22-16-52-00-977_io.github.shintochakkiath.silicacluster.jpg" width = "250" >   <img src = "/Screenshot_2026-04-22-16-52-08-737_io.github.shintochakkiath.silicacluster.jpg" width = "250" >
 <img src = "/Screenshot_2026-04-22-16-52-18-494_io.github.shintochakkiath.silicacluster.jpg" width = "250" >
 <img src = "/Screenshot_2026-04-22-16-52-26-620_io.github.shintochakkiath.silicacluster.jpg" width = "250" >
 <img src = "/Screenshot_2026-04-22-16-52-36-997_io.github.shintochakkiath.silicacluster.jpg" width = "250" >
