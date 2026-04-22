@@ -396,10 +396,6 @@ fun ChatScreen(
                     modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp).fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = { /* Implement later */ }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add Attachment", tint = MaterialTheme.colorScheme.primary)
-                    }
-                
                 OutlinedTextField(
                     value = inputText,
                     onValueChange = { inputText = it },
