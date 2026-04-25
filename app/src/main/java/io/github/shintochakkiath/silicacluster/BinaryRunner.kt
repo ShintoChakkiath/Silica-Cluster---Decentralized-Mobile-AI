@@ -39,9 +39,34 @@ class BinaryRunner(val context: Context) {
     // We assume the binaries are packaged as .so files in jniLibs so Android extracts them.
     private val nativeLibDir = context.applicationInfo.nativeLibraryDir
 
-    suspend fun startLlamaServer(modelPath: String, isWorker: Boolean = false, workerIp: String? = null, threadCount: Int = 4) {
+    suspend fun startLlamaServer(modelPath: String, isWorker: Boolean = false, workerIp: String? = null, threadCount: Int = 4, offloadedLayers: Int = -1, masterPct: Float = 0f, extraRpcNodes: String = "") {
         withContext(Dispatchers.IO) {
             try {
+                // Force close any previously orphaned process managed by this runner
+                currentProcess?.destroy()
+                currentProcess = null
+
+                // ROBUST ZOMBIE KILLER: Android OS updates or swiping the app away leaves the native C++ binary running
+                // holding the 50052/8080 port hostage. We must aggressively hunt it down and kill it.
+                try {
+                    val ps = Runtime.getRuntime().exec("ps")
+                    val reader = BufferedReader(InputStreamReader(ps.inputStream))
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        if (line!!.contains("librpc.so") || line!!.contains("libllama.so")) {
+                            val parts = line!!.trim().split(Regex("\\s+"))
+                            if (parts.size > 1) {
+                                val pid = parts[1]
+                                Runtime.getRuntime().exec(arrayOf("kill", "-9", pid)).waitFor()
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Fallback to killall if ps parsing fails
+                    try { Runtime.getRuntime().exec(arrayOf("killall", "-9", "librpc.so")).waitFor() } catch (e2: Exception) {}
+                    try { Runtime.getRuntime().exec(arrayOf("killall", "-9", "libllama.so")).waitFor() } catch (e2: Exception) {}
+                }
+
                 val binaryName = if (isWorker) "librpc.so" else "libllama.so"
                 val executable = File(nativeLibDir, binaryName)
                 
@@ -55,10 +80,21 @@ class BinaryRunner(val context: Context) {
 
                 val cmdArgs = mutableListOf(executable.absolutePath)
                 if (isWorker) {
+                    var portToUse = 50052
+                    for (p in 50052..50100) {
+                        try {
+                            val socket = java.net.ServerSocket(p)
+                            socket.close()
+                            portToUse = p
+                            break
+                        } catch (e: Exception) {}
+                    }
+                    BridgeStateManager.rpcPort.value = portToUse
+
                     cmdArgs.add("--host")
                     cmdArgs.add("0.0.0.0")
                     cmdArgs.add("--port")
-                    cmdArgs.add("50052") // Default RPC port
+                    cmdArgs.add(portToUse.toString())
                 } else {
                     cmdArgs.add("-m")
                     cmdArgs.add(modelPath)
@@ -66,19 +102,25 @@ class BinaryRunner(val context: Context) {
                     cmdArgs.add("0.0.0.0") // Listen on all interfaces to bypass IPv4/IPv6 loopback mismatches
                     cmdArgs.add("--port")
                     cmdArgs.add("8080")
+                    cmdArgs.add("-c")
+                    cmdArgs.add("4096") // explicitly set context size to prevent prompt overflow socket drops
                     cmdArgs.add("-t")
                     cmdArgs.add(threadCount.toString())
                     
                     val initialNodes = NodeManager.activeNodes.value.filter { it.status == NodeStatus.ONLINE }
                     val validatedNodes = mutableListOf<String>()
                     
-                    if (initialNodes.isNotEmpty()) {
+                    if (extraRpcNodes.isNotEmpty()) {
+                        validatedNodes.addAll(extraRpcNodes.split(","))
+                        ActivityLogger.logSystemMessage("Distributed Sub-Master: Targeting ${validatedNodes.size} secondary workers...")
+                    } else if (initialNodes.isNotEmpty()) {
                         ActivityLogger.logSystemMessage("Distributed Pre-Flight: Verifying ${initialNodes.size} workers...")
                         initialNodes.forEach { node ->
-                            val isAlive = NetworkManager.pingWorkerNode(node.ip, timeoutMs = 1500)
+                            val targetPort = node.telemetry?.rpcPort ?: 50052
+                            val isAlive = NetworkManager.pingWorkerNode(node.ip, port = targetPort, timeoutMs = 1500)
                             if (isAlive) {
-                                validatedNodes.add("${node.ip}:50052")
-                                ActivityLogger.logSystemMessage("Verified Node: ${node.ip} [READY]")
+                                validatedNodes.add("${node.ip}:$targetPort")
+                                ActivityLogger.logSystemMessage("Verified Node: ${node.ip}:$targetPort [READY]")
                             } else {
                                 NodeManager.updateNodeStatus(node.ip, NodeStatus.UNREACHABLE)
                                 ActivityLogger.logSystemMessage("Skipping Node: ${node.ip} [UNREACHABLE]")
@@ -90,15 +132,28 @@ class BinaryRunner(val context: Context) {
                         val rpcString = validatedNodes.joinToString(",")
                         cmdArgs.add("--rpc")
                         cmdArgs.add(rpcString)
-                        // STABILITY OFF-LOADING: 8 layers default
-                        cmdArgs.add("-ngl")
-                        cmdArgs.add("8")
-                        // Enforce no-mmap in distributed mode to prevent chunk fault assertions
-                        cmdArgs.add("--no-mmap")
+                        
+                        // STABILITY OFF-LOADING: Dynamic Distribution
+                        if (offloadedLayers == -1) {
+                            // Fallback: Proportional tensor split
+                            cmdArgs.add("-ngl")
+                            cmdArgs.add("999")
+                            cmdArgs.add("--tensor-split")
+                            cmdArgs.add("${masterPct.toInt()},${(100f - masterPct).toInt()}")
+                        } else {
+                            // Precise layer split
+                            cmdArgs.add("-ngl")
+                            cmdArgs.add(offloadedLayers.toString())
+                        }
+                        
                         appendLog("Worker Cluster: Multi-node RPC Handshake Initiated...")
                     } else if (initialNodes.isNotEmpty()) {
                         ActivityLogger.logSystemMessage("Warning: No workers responded. Reverting to LOCAL inference.")
                     }
+                    
+                    // Enforce no-mmap globally on Android to prevent SIGABRT 134 chunk fault assertions
+                    // Android's virtual memory mapper often denies contiguous 3GB+ allocations.
+                    cmdArgs.add("--no-mmap")
                 }
 
                 ActivityLogger.logSystemMessage("Kernel Boot: ${cmdArgs.joinToString(" ")}")

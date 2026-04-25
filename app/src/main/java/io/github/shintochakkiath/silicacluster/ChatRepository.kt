@@ -37,7 +37,8 @@ data class ChatSession(
     var title: String = "New Chat",
     val messages: MutableList<ChatMessage> = mutableListOf(),
     var timestamp: Long = System.currentTimeMillis(),
-    var isPinned: Boolean = false
+    var isPinned: Boolean = false,
+    val usedModels: MutableSet<String> = mutableSetOf()
 )
 
 object ChatRepository {
@@ -51,9 +52,22 @@ object ChatRepository {
 
     suspend fun initialize(context: Context) {
         val loaded = loadFromFile(context)
-        _sessions.value = loaded.sortedWith(compareByDescending<ChatSession> { it.isPinned }.thenByDescending { it.timestamp })
-        if (loaded.isNotEmpty()) {
-            _activeSessionId.value = loaded.first().id
+        val sortedList = loaded.sortedWith(compareByDescending<ChatSession> { it.isPinned }.thenByDescending { it.timestamp })
+        
+        // Find an existing empty unpinned chat to reuse, or create a new one
+        val existingEmpty = sortedList.find { it.messages.isEmpty() && !it.isPinned }
+        
+        if (existingEmpty != null) {
+            // Reuse the existing empty chat and bring it to the top implicitly by updating timestamp
+            existingEmpty.timestamp = System.currentTimeMillis()
+            _sessions.value = sortedList.sortedWith(compareByDescending<ChatSession> { it.isPinned }.thenByDescending { it.timestamp })
+            _activeSessionId.value = existingEmpty.id
+        } else {
+            // Create a fresh new chat for this session
+            val newSession = ChatSession()
+            _sessions.value = listOf(newSession) + sortedList
+            _activeSessionId.value = newSession.id
+            saveToFileAsync(context)
         }
     }
 
@@ -78,7 +92,7 @@ object ChatRepository {
         saveToFileAsync(context)
     }
 
-    fun addMessageToActive(context: Context, message: ChatMessage) {
+    fun addMessageToActive(context: Context, message: ChatMessage, usedModel: String? = null) {
         val currentSessions = _sessions.value.toMutableList()
         val activeId = _activeSessionId.value
         
@@ -87,6 +101,11 @@ object ChatRepository {
             val session = currentSessions[activeIndex]
             val newMessages = session.messages.toMutableList()
             newMessages.add(message)
+            
+            val newUsedModels = session.usedModels.toMutableSet()
+            if (usedModel != null) {
+                newUsedModels.add(usedModel)
+            }
             
             // Auto-generate title from first user message
             val newTitle = if (newMessages.count { it.role == "user" } == 1 && session.title == "New Chat") {
@@ -98,7 +117,8 @@ object ChatRepository {
             val newSession = session.copy(
                 messages = newMessages,
                 timestamp = System.currentTimeMillis(),
-                title = newTitle
+                title = newTitle,
+                usedModels = newUsedModels
             )
             
             // Bring to top
@@ -146,6 +166,10 @@ object ChatRepository {
                     sessionObj.put("title", session.title)
                     sessionObj.put("timestamp", session.timestamp)
                     sessionObj.put("isPinned", session.isPinned)
+                    
+                    val modelsArray = JSONArray()
+                    session.usedModels.forEach { modelsArray.put(it) }
+                    sessionObj.put("usedModels", modelsArray)
                     
                     val messagesArray = JSONArray()
                     session.messages.forEach { msg ->
@@ -211,7 +235,15 @@ object ChatRepository {
                     )
                 }
                 
-                result.add(ChatSession(id, title, messages, timestamp, isPinned))
+                val usedModels = mutableSetOf<String>()
+                if (sessionObj.has("usedModels")) {
+                    val modelsArr = sessionObj.getJSONArray("usedModels")
+                    for (m in 0 until modelsArr.length()) {
+                        usedModels.add(modelsArr.getString(m))
+                    }
+                }
+                
+                result.add(ChatSession(id, title, messages, timestamp, isPinned, usedModels))
             }
             return@withContext result
         } catch (e: Exception) {

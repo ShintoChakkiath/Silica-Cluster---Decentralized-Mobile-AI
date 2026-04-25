@@ -28,7 +28,9 @@ data class WorkerTelemetry(
     val totalRamGb: Double,
     val cpuCount: Int,
     val threadCount: Int,
-    val batteryTempCelsius: Double
+    val batteryTempCelsius: Double,
+    val measuredTops: Double = 0.0,
+    val rpcPort: Int = 50052
 )
 
 data class WorkerNode(

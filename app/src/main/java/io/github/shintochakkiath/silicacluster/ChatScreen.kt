@@ -422,7 +422,7 @@ fun ChatScreen(
                                     ChatRepository.createNewChat(context)
                                 }
                                 
-                                ChatRepository.addMessageToActive(context, ChatMessage("user", userText))
+                                ChatRepository.addMessageToActive(context, ChatMessage("user", userText), usedModel = selectedModel)
                                 isSending = true
                                 
                                 scope.launch {
@@ -501,7 +501,8 @@ $contextPrompt
                                         val allMessages = fullSession?.messages?.toList() ?: emptyList()
                                         
                                         val apiMessages = mutableListOf<ChatMessage>()
-                                        apiMessages.add(ChatMessage("system", "You are Silica, a helpful and highly intelligent AI assistant. Provide clear, direct, and factual answers."))
+                                        val activeModelName = selectedModel ?: "a decentralized neural network"
+                                        apiMessages.add(ChatMessage("system", "You are Silica, a helpful AI assistant. If asked about your identity, clarify that you are Silica, currently running on the [$activeModelName] model. Do not claim to be the model itself; you are the Silica interface powered by it. Provide clear, direct, and factual answers."))
                                         apiMessages.addAll(allMessages)
                                         
                                         if (searchResultsText.isNotEmpty() && apiMessages.isNotEmpty()) {
@@ -525,7 +526,7 @@ $contextPrompt
                                                           response.content.startsWith("Connection Refused", ignoreCase = true) || 
                                                           response.content.startsWith("Error", ignoreCase = true)
                                             val finalResponse = if (sourceUrls.isNotEmpty() && !isError) response.copy(sourceUrls = sourceUrls) else response
-                                            ChatRepository.addMessageToActive(context, finalResponse)
+                                            ChatRepository.addMessageToActive(context, finalResponse, usedModel = selectedModel)
                                         }
                                         listState.animateScrollToItem(ChatRepository.sessions.value.find { it.id == ChatRepository.activeSessionId.value }?.messages?.size ?: 0)
                                     } finally {

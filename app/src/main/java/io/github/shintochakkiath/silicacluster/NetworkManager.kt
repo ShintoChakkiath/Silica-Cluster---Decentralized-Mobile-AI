@@ -63,8 +63,8 @@ object NetworkManager {
     }
 
     /**
-     * Executes a massive parallel TCP sweep across the /24 local subnet to discover active RPC worker nodes.
-     * Guaranteed to finish within 800ms globally by spawning 254 coroutines.
+     * Executes a batched TCP sweep across the /24 local subnet to discover active RPC worker nodes.
+     * Batched to prevent ARP flood/file descriptor exhaustion. Targets port 8082 (Telemetry) as it boots instantly.
      */
     suspend fun discoverLocalWorkers(): List<String> = withContext(Dispatchers.IO) {
         val localIp = getLocalIpAddress()
@@ -73,18 +73,26 @@ object NetworkManager {
         }
 
         val baseIp = localIp.substringBeforeLast(".") // e.g. "192.168.1"
-        // Spawn 254 parallel ping jobs
-        val deferreds: List<kotlinx.coroutines.Deferred<String?>> = (1..254).map { host ->
-            async(Dispatchers.IO) {
-                val targetIp = "$baseIp.$host"
-                // Don't ping ourselves
-                if (targetIp == localIp) return@async null
-                
-                if (pingWorkerNode(targetIp, timeoutMs = 2500)) targetIp else null
+        val activeNodes = mutableListOf<String>()
+        
+        // Chunk into batches of 45 to avoid OS socket drop (No buffer space available)
+        val allHosts = (1..254).toList()
+        for (chunk in allHosts.chunked(45)) {
+            val deferreds = chunk.map { host ->
+                async(Dispatchers.IO) {
+                    val targetIp = "$baseIp.$host"
+                    if (targetIp == localIp) return@async null
+                    
+                    // Telemetry port 8082 boots instantly upon START LISTENING.
+                    // 50052 (librpc) is delayed until the model loads.
+                    // Timeout increased to 2500ms to survive Android ARP cache misses and CPU thread starvation.
+                    if (pingWorkerNode(targetIp, port = 8082, timeoutMs = 2500)) targetIp else null
+                }
             }
+            activeNodes.addAll(deferreds.awaitAll().filterNotNull())
         }
         
-        deferreds.awaitAll().filterNotNull()
+        activeNodes
     }
 
     /**
@@ -128,7 +136,9 @@ object NetworkManager {
                         totalRamGb = json.optDouble("totalRamGb", 0.0),
                         cpuCount = json.optInt("cpuCount", 0),
                         threadCount = json.optInt("threadCount", 0),
-                        batteryTempCelsius = json.optDouble("batteryTempCelsius", 0.0)
+                        batteryTempCelsius = json.optDouble("batteryTempCelsius", 0.0),
+                        measuredTops = json.optDouble("measuredTops", 0.0),
+                        rpcPort = json.optInt("rpcPort", 50052)
                     )
                 } else {
                     null
@@ -144,6 +154,8 @@ object NetworkManager {
             val url = java.net.URL("http://$workerIp:8082/request-join")
             val connection = url.openConnection() as java.net.HttpURLConnection
             connection.requestMethod = "POST"
+            connection.connectTimeout = 2000
+            connection.readTimeout = 2000
             connection.doOutput = true
             connection.instanceFollowRedirects = false
             connection.setRequestProperty("Content-Type", "application/json")
@@ -163,6 +175,7 @@ object NetworkManager {
             val connection = url.openConnection() as java.net.HttpURLConnection
             connection.requestMethod = "GET"
             connection.connectTimeout = 2000
+            connection.readTimeout = 2000
             
             if (connection.responseCode == 200) {
                 val json = org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })

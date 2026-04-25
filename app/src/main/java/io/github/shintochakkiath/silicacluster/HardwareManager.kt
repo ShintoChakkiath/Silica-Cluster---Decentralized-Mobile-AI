@@ -29,8 +29,39 @@ object HardwareManager {
         val totalRamGb: Double,
         val cpuCount: Int,
         val freeStorageGb: Double,
-        val batteryTempCelsius: Double
+        val batteryTempCelsius: Double,
+        val measuredTops: Double
     )
+
+    private var cachedTops: Double? = null
+
+    private fun measureSyntheticTops(): Double {
+        if (cachedTops != null) return cachedTops!!
+        
+        val cores = maxOf(1, Runtime.getRuntime().availableProcessors())
+        val opsPerThread = 20_000_000L
+        val start = System.nanoTime()
+        
+        val threads = (0 until cores).map {
+            Thread {
+                var sum = 0L
+                for (i in 0 until opsPerThread) {
+                    sum += (i * 3) xor (i shr 2)
+                }
+            }.apply { start() }
+        }
+        threads.forEach { it.join() }
+        
+        val durationSec = maxOf(0.001, (System.nanoTime() - start) / 1_000_000_000.0)
+        val totalOps = cores * opsPerThread * 3.0
+        
+        // Mathematically accurate CPU throughput (Giga-Operations Per Second)
+        // We no longer scale this with fake multipliers for NPU assumptions.
+        val gops = (totalOps / durationSec) / 1_000_000_000.0
+        
+        cachedTops = maxOf(0.1, gops)
+        return cachedTops!!
+    }
 
     fun getDeviceInfo(context: Context): DeviceInfo {
         return try {
@@ -59,10 +90,12 @@ object HardwareManager {
             val tempRaw = batteryStatus?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
             val tempCelsius = tempRaw / 10.0
 
-            DeviceInfo(availableRam, totalRam, cores, freeStorage, tempCelsius)
+            val tops = measureSyntheticTops()
+
+            DeviceInfo(availableRam, totalRam, cores, freeStorage, tempCelsius, tops)
         } catch (e: Exception) {
             // Absolute fail-safe default values
-            DeviceInfo(0.0, 1.0, 1, 0.0, 0.0)
+            DeviceInfo(0.0, 1.0, 1, 0.0, 0.0, 1.0)
         }
     }
 }

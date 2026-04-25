@@ -215,6 +215,33 @@ class MainActivity : ComponentActivity() {
                     if (k != null && k.isNotBlank()) userApiKey = k
                 }
 
+                // Global Dialog for incoming connection requests
+                val incomingRequestIp by BridgeStateManager.incomingRequestIp.collectAsState()
+                if (incomingRequestIp != null) {
+                    AlertDialog(
+                        onDismissRequest = { BridgeStateManager.incomingRequestIp.value = null },
+                        title = { Text("Cluster Connection Request") },
+                        text = { Text("Remote device at $incomingRequestIp is requesting access to your compute cores. Allow this connection?") },
+                        confirmButton = {
+                            Button(onClick = { 
+                                BridgeStateManager.trustedMasterIp.value = incomingRequestIp
+                                BridgeStateManager.incomingRequestIp.value = null
+                                BridgeStateManager.workerStatus.value = "Connected"
+                            }, colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)) {
+                                Text("ALLOW", color = Color.Black)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { 
+                                BridgeStateManager.incomingRequestIp.value = null
+                                BridgeStateManager.workerStatus.value = "Listening"
+                            }) {
+                                Text("DENY")
+                            }
+                        }
+                    )
+                }
+
                 ModalNavigationDrawer(
                     drawerState = drawerState,
                     gesturesEnabled = true,
@@ -254,7 +281,14 @@ class MainActivity : ComponentActivity() {
                                 Text("Previous Chats", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                                 visibleChats.take(chatLimit).forEach { chat ->
                                     NavigationDrawerItem(
-                                        label = { Text(chat.title, maxLines = 1) },
+                                        label = { 
+                                            Column {
+                                                Text(chat.title, maxLines = 1)
+                                                if (chat.usedModels.isNotEmpty()) {
+                                                    Text(chat.usedModels.joinToString(", "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontSize = 10.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                                }
+                                            }
+                                        },
                                         selected = activeSessionId == chat.id,
                                         onClick = { 
                                             ChatRepository.setActiveSession(chat.id)
@@ -435,6 +469,9 @@ class MainActivity : ComponentActivity() {
                                 isServerRunning = isServerRunning,
                                 onStartService = { model, bridge, workerMode, _ ->
                                     if (model != null || workerMode) {
+                                        BridgeStateManager.bridgeLogs.value = emptyList()
+                                        BridgeStateManager.isLlamaReady.value = false
+                                        BridgeStateManager.engineCrashed.value = false
                                         startSilicaServer(model ?: ModelDirectory.getModels(applicationContext).first(), bridge, workerMode, "", isOfflineMode)
                                         isServerRunning = true
                                     }
@@ -452,6 +489,9 @@ class MainActivity : ComponentActivity() {
                                 isServerRunning = isServerRunning,
                                 onStartWorkerServer = {
                                     isWorkerMode = true
+                                    BridgeStateManager.bridgeLogs.value = emptyList()
+                                    BridgeStateManager.isLlamaReady.value = false
+                                    BridgeStateManager.engineCrashed.value = false
                                     startSilicaServer(ModelDirectory.getModels(applicationContext).first(), InternetBridge.Cloudflare_Free, true, "", isOfflineMode)
                                     isServerRunning = true
                                 },
@@ -557,6 +597,11 @@ fun SetupScreen(
     var isDownloaded by remember { mutableStateOf(false) }
     LaunchedEffect(selectedModel, activeDownloads) {
         isDownloaded = File(modelFile.absolutePath + ".completed").exists()
+        if (selectedModel != null && isDownloaded) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                BridgeStateManager.activeModelTotalLayers.value = GgufMetadataParser.getTotalLayers(modelFile)
+            }
+        }
     }
 
     // Hardware Telemetry (Defensively handled on background thread)
@@ -1045,7 +1090,11 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(prompt.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                            Text(if (prompt.keywords.isBlank()) "Fallback (No keywords)" else prompt.keywords, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            val meta = buildString {
+                                append(if (prompt.keywords.isBlank()) "Fallback (No keywords)" else prompt.keywords)
+                                if (prompt.wordCount != null && prompt.wordCount > 0) append(" | ${prompt.wordCount} words")
+                            }
+                            Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                             Text(prompt.prompt, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 2)
                         }
                         
@@ -1066,6 +1115,7 @@ fun SettingsScreen(
             var pTitle by remember { mutableStateOf(editingPrompt?.title ?: "") }
             var pKeywords by remember { mutableStateOf(editingPrompt?.keywords ?: "") }
             var pPrompt by remember { mutableStateOf(editingPrompt?.prompt ?: "") }
+            var pWordCount by remember { mutableStateOf(editingPrompt?.wordCount?.toString() ?: "") }
             
             AlertDialog(
                 onDismissRequest = { showAddPromptDialog = false },
@@ -1088,15 +1138,22 @@ fun SettingsScreen(
                             value = pPrompt,
                             onValueChange = { pPrompt = it },
                             label = { Text("Response Format Instruction") },
-                            modifier = Modifier.fillMaxWidth().height(150.dp),
+                            modifier = Modifier.fillMaxWidth().height(150.dp).padding(bottom = 8.dp),
                             maxLines = 10
+                        )
+                        OutlinedTextField(
+                            value = pWordCount,
+                            onValueChange = { if (it.all { char -> char.isDigit() }) pWordCount = it },
+                            label = { Text("Word Count (Optional)") },
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 },
                 confirmButton = {
                     Button(onClick = {
                         if (pTitle.isNotBlank() && pPrompt.isNotBlank()) {
-                            ContextProgrammingManager.addOrUpdatePrompt(context, editingPrompt?.id, pTitle, pKeywords, pPrompt)
+                            val wc = pWordCount.toIntOrNull()
+                            ContextProgrammingManager.addOrUpdatePrompt(context, editingPrompt?.id, pTitle, pKeywords, pPrompt, wc)
                             showAddPromptDialog = false
                         }
                     }) {
@@ -1265,31 +1322,7 @@ fun DistributedScreen(
         }
 
         // DIALOGS
-        val incomingRequestIp by BridgeStateManager.incomingRequestIp.collectAsState()
-        if (incomingRequestIp != null) {
-            AlertDialog(
-                onDismissRequest = { BridgeStateManager.incomingRequestIp.value = null },
-                title = { Text("Cluster Connection Request") },
-                text = { Text("Remote device at $incomingRequestIp is requesting access to your compute cores. Allow this connection?") },
-                confirmButton = {
-                    Button(onClick = { 
-                        BridgeStateManager.trustedMasterIp.value = incomingRequestIp
-                        BridgeStateManager.incomingRequestIp.value = null
-                        BridgeStateManager.workerStatus.value = "Connected"
-                    }, colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)) {
-                        Text("ALLOW", color = Color.Black)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { 
-                        BridgeStateManager.incomingRequestIp.value = null
-                        BridgeStateManager.workerStatus.value = "Listening"
-                    }) {
-                        Text("DENY")
-                    }
-                }
-            )
-        }
+        // incomingRequestIp dialog hoisted to global scope in MainActivity
 
         if (!isWorkerMode) {
             Spacer(modifier = Modifier.height(32.dp))
@@ -1343,22 +1376,185 @@ fun DistributedScreen(
         val leaderInfo = remember { HardwareManager.getDeviceInfo(context) }
         val threadCount by BridgeStateManager.threadCount.collectAsState()
         
+        // Capability Scoring
+        LaunchedEffect(onlineWorkers.size) {
+            if (onlineWorkers.isNotEmpty() && BridgeStateManager.masterComputePercentage.value == null) {
+                val firstWorker = onlineWorkers.first()
+                val workerTelemetry = firstWorker.telemetry
+                if (workerTelemetry != null) {
+                    val masterScore = leaderInfo.totalRamGb * leaderInfo.cpuCount
+                    val workerScore = workerTelemetry.totalRamGb * workerTelemetry.cpuCount
+                    val initialPercentage = (masterScore / (masterScore + workerScore)) * 100f
+                    BridgeStateManager.masterComputePercentage.value = initialPercentage.toFloat()
+                } else {
+                    BridgeStateManager.masterComputePercentage.value = 50f
+                }
+            }
+        }
+        
         // Use user-selected threadCount for local contribution, plus worker allocated threads
-        val totalCores = threadCount + onlineWorkers.sumOf { it.telemetry?.threadCount ?: 0 }
-        val totalRam = leaderInfo.totalRamGb + onlineWorkers.sumOf { it.telemetry?.totalRamGb ?: 0.0 }
-        val totalAvailableRam = leaderInfo.availableRamGb + onlineWorkers.sumOf { it.telemetry?.availableRamGb ?: 0.0 }
+        val fullWorkerOffload by BridgeStateManager.fullWorkerOffload.collectAsState()
+        
+        val totalCores = if (fullWorkerOffload) {
+            onlineWorkers.sumOf { it.telemetry?.threadCount ?: 0 }
+        } else {
+            threadCount + onlineWorkers.sumOf { it.telemetry?.threadCount ?: 0 }
+        }
+        
+        val totalRam = if (fullWorkerOffload) {
+            onlineWorkers.sumOf { it.telemetry?.totalRamGb ?: 0.0 }
+        } else {
+            leaderInfo.totalRamGb + onlineWorkers.sumOf { it.telemetry?.totalRamGb ?: 0.0 }
+        }
+        
+        val totalAvailableRam = if (fullWorkerOffload) {
+            onlineWorkers.sumOf { it.telemetry?.availableRamGb ?: 0.0 }
+        } else {
+            leaderInfo.availableRamGb + onlineWorkers.sumOf { it.telemetry?.availableRamGb ?: 0.0 }
+        }
+        
+        // Calculate Mathematically Verifiable CPU GOPS
+        var estimatedGops = 0.0
+        var hasExternalNodes = false
+        
+        // 1. Master Device Compute (Scaled by allocated threads)
+        if (!fullWorkerOffload) {
+            val masterRatio = (threadCount.toDouble() / maxOf(1, leaderInfo.cpuCount).toDouble()).coerceIn(0.1, 1.0)
+            estimatedGops += leaderInfo.measuredTops * masterRatio
+        }
+        
+        // 2. Worker Nodes Compute (Scaled by allocated threads)
+        for (worker in onlineWorkers) {
+            if (worker.telemetry != null) {
+                val workerRatio = (worker.telemetry!!.threadCount.toDouble() / maxOf(1, worker.telemetry!!.cpuCount).toDouble()).coerceIn(0.1, 1.0)
+                estimatedGops += worker.telemetry!!.measuredTops * workerRatio
+            } else {
+                // External PC / Llama-rpc server without Android Telemetry
+                hasExternalNodes = true
+            }
+        }
+        
+        val computeDisplay = String.format("%.1f", estimatedGops) + if (hasExternalNodes) " + EXT" else ""
 
         GlassCard(borderColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("SWARM CAPACITY", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
-                    Text("${totalCores} THREADS | ${String.format("%.1f", totalAvailableRam)} GB AVAIL", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                    Text("${totalCores} THREADS | ${computeDisplay} GOPS", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                    Text("${String.format("%.1f", totalAvailableRam)} GB AVAILABLE RAM", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
                 }
                 Icon(Icons.Default.Hub, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(32.dp))
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+        
+        // DISTRIBUTED COMPUTE SPLIT UI
+        if (onlineWorkers.isNotEmpty()) {
+            val fullWorkerOffload by BridgeStateManager.fullWorkerOffload.collectAsState()
+            val masterPct = BridgeStateManager.masterComputePercentage.collectAsState().value ?: 50f
+            val activeModelTotalLayers by BridgeStateManager.activeModelTotalLayers.collectAsState()
+            
+            GlassCard(borderColor = MatrixGreen.copy(alpha = 0.5f)) {
+                Text("DISTRIBUTED COMPUTE SPLIT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 12.dp))
+                
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("100% Worker Offload", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                        val text = if (onlineWorkers.size > 1) {
+                            "Master does 0 calculations. Network creates a Sub-Master from Worker 1 and distributes layers to other workers."
+                        } else {
+                            "Send all computation to the worker node. Master phone does 0 calculations."
+                        }
+                        Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    }
+                    Switch(
+                        checked = fullWorkerOffload,
+                        onCheckedChange = { BridgeStateManager.fullWorkerOffload.value = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = MatrixGreen, checkedTrackColor = MatrixGreen.copy(alpha = 0.2f))
+                    )
+                }
+                
+                if (!fullWorkerOffload) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("Master ${masterPct.toInt()}%", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                        
+                        TextButton(
+                            onClick = {
+                                val mRatio = (threadCount.toDouble() / maxOf(1, leaderInfo.cpuCount).toDouble()).coerceIn(0.1, 1.0)
+                                val mGops = leaderInfo.measuredTops * mRatio
+                                
+                                var wGops = 0.0
+                                onlineWorkers.forEach { w ->
+                                    if (w.telemetry != null) {
+                                        val wRatio = (w.telemetry!!.threadCount.toDouble() / maxOf(1, w.telemetry!!.cpuCount).toDouble()).coerceIn(0.1, 1.0)
+                                        wGops += w.telemetry!!.measuredTops * wRatio
+                                    } else {
+                                        wGops += 150.0 // Baseline for external
+                                    }
+                                }
+                                
+                                if (mGops + wGops > 0) {
+                                    val idealPct = (mGops / (mGops + wGops)) * 100.0
+                                    BridgeStateManager.masterComputePercentage.value = idealPct.toFloat()
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Icon(androidx.compose.material.icons.Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Auto-Optimize", style = MaterialTheme.typography.labelSmall)
+                        }
+
+                        Text("Worker ${(100f - masterPct).toInt()}%", style = MaterialTheme.typography.titleSmall, color = MatrixGreen)
+                    }
+                    
+                    Slider(
+                        value = masterPct,
+                        onValueChange = { BridgeStateManager.masterComputePercentage.value = it },
+                        valueRange = 0f..100f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = MatrixGreen
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        if (activeModelTotalLayers != null) {
+                            val mLayer = (activeModelTotalLayers!! * (masterPct / 100f)).toInt()
+                            val wLayer = activeModelTotalLayers!! - mLayer
+                            Text("$mLayer Layers", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            Text("$wLayer Layers", style = MaterialTheme.typography.labelSmall, color = MatrixGreen)
+                        } else {
+                            Text("Calculated at Boot", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            Text("Calculated at Boot", style = MaterialTheme.typography.labelSmall, color = MatrixGreen)
+                        }
+                    }
+                    
+                    if (activeModelTotalLayers == null) {
+                        Text("Note: The LLM's layers couldn't be analyzed, but you can set a % and the system will divide the workload accordingly.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 8.dp))
+                    }
+                } else {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Master Device 0%", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                        Text("Worker Device 100%", style = MaterialTheme.typography.titleSmall, color = MatrixGreen)
+                    }
+                    if (activeModelTotalLayers != null) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("0 Layers", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            Text("$activeModelTotalLayers Layers", style = MaterialTheme.typography.labelSmall, color = MatrixGreen)
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+        }
 
         // NODE LIST
         Text("TOPOLOGY", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
@@ -1455,7 +1651,7 @@ fun NodeTelemetryCard(node: WorkerNode) {
             val masterIp = NetworkManager.getLocalIpAddress()
             
             // 1. Initial Ping
-            val isOnline = NetworkManager.pingWorkerNode(node.ip, timeoutMs = 800)
+            val isOnline = NetworkManager.pingWorkerNode(node.ip, port = 8082, timeoutMs = 2000)
             if (!isOnline) {
                 NodeManager.updateNodeStatus(node.ip, NodeStatus.UNREACHABLE)
                 return@LaunchedEffect
@@ -2182,7 +2378,48 @@ fun ActivityTerminalSheet(onDismiss: () -> Unit) {
 fun WorkerTerminalDialog(onDismiss: () -> Unit) {
     val logs by BridgeStateManager.workerLogs.collectAsState()
     val scrollState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val context = LocalContext.current
     
+    // Live Hardware Telemetry
+    var deviceInfo by remember { mutableStateOf<HardwareManager.DeviceInfo?>(null) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            while(true) {
+                try {
+                    val info = HardwareManager.getDeviceInfo(context)
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        deviceInfo = info
+                    }
+                } catch (e: Exception) {}
+                kotlinx.coroutines.delay(2000)
+            }
+        }
+    }
+
+    // Derived Swarm Metrics
+    val masterIp by BridgeStateManager.trustedMasterIp.collectAsState()
+    val threadCount by BridgeStateManager.threadCount.collectAsState()
+    
+    val inferenceSpeed = remember(logs) {
+        logs.reversed().find { it.contains("t/s", ignoreCase = true) }?.let {
+            // Regex to extract e.g. "24.5 t/s"
+            val match = Regex("""([\d.]+\s*t/s)""").find(it)
+            match?.groupValues?.get(1) ?: "Calculating..."
+        } ?: "---"
+    }
+    
+    val engineState = remember(logs) {
+        val recentLogs = logs.takeLast(10).joinToString(" ").lowercase()
+        when {
+            recentLogs.contains("error") || recentLogs.contains("fail") -> "ERROR / STALLED"
+            recentLogs.contains("eval") || recentLogs.contains("t/s") -> "COMPUTING TENSORS"
+            recentLogs.contains("prompt") -> "INGESTING PROMPT"
+            recentLogs.contains("load") || recentLogs.contains("tensor") -> "LOADING SHARDS"
+            masterIp != null -> "IDLE (ATTACHED TO MASTER)"
+            else -> "LISTENING ON PORT 8082..."
+        }
+    }
+
     LaunchedEffect(logs.size) {
         if (logs.isNotEmpty()) {
             scrollState.animateScrollToItem(logs.size - 1)
@@ -2195,26 +2432,96 @@ fun WorkerTerminalDialog(onDismiss: () -> Unit) {
     ) {
         Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                // HEADER
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Terminal, contentDescription = null, tint = MatrixGreen, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(12.dp))
-                    Text("COMPUTE CONSOLE", style = MaterialTheme.typography.titleLarge, color = MatrixGreen)
+                    Text("WORKER NODE CONSOLE", style = MaterialTheme.typography.titleLarge, color = MatrixGreen, fontWeight = FontWeight.Black)
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Default.Close, contentDescription = "Close", tint = MatrixGreen)
                     }
                 }
                 
+                Spacer(Modifier.height(16.dp))
+
+                // TOPOLOGY & STATUS DASHBOARD
+                Column(modifier = Modifier.fillMaxWidth().border(1.dp, MatrixGreen.copy(alpha = 0.3f), RoundedCornerShape(8.dp)).padding(12.dp)) {
+                    Text("SWARM TOPOLOGY", style = MaterialTheme.typography.labelSmall, color = MatrixGreen.copy(alpha = 0.6f))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column {
+                            Text("ROLE", style = MaterialTheme.typography.labelSmall, color = MatrixGreen.copy(alpha = 0.6f))
+                            Text("Compute Node", style = MaterialTheme.typography.titleSmall, color = MatrixGreen)
+                        }
+                        Icon(Icons.Default.ArrowForward, contentDescription = null, tint = MatrixGreen.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("MASTER UPLINK", style = MaterialTheme.typography.labelSmall, color = MatrixGreen.copy(alpha = 0.6f))
+                            Text(masterIp ?: "Disconnected", style = MaterialTheme.typography.titleSmall, color = if (masterIp != null) MatrixGreen else AlertRed)
+                        }
+                    }
+                    
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = MatrixGreen.copy(alpha = 0.2f))
+                    
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("PIPELINE STATE", style = MaterialTheme.typography.labelSmall, color = MatrixGreen.copy(alpha = 0.6f))
+                            Text(engineState, style = MaterialTheme.typography.labelMedium, color = if (engineState.contains("ERROR")) AlertRed else MatrixGreen, fontWeight = FontWeight.Bold)
+                        }
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                            Text("NODE PERFORMANCE", style = MaterialTheme.typography.labelSmall, color = MatrixGreen.copy(alpha = 0.6f))
+                            Text(inferenceSpeed, style = MaterialTheme.typography.labelMedium, color = MatrixGreen, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                
+                Spacer(Modifier.height(12.dp))
+
+                // HARDWARE TELEMETRY
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val boxMod = Modifier.weight(1f).border(1.dp, MatrixGreen.copy(alpha = 0.3f), RoundedCornerShape(8.dp)).padding(8.dp)
+                    Box(modifier = boxMod) {
+                        Column {
+                            Text("CPU CORES", style = MaterialTheme.typography.labelSmall, color = MatrixGreen.copy(alpha = 0.6f))
+                            Text("${deviceInfo?.cpuCount ?: "-"} (Alloc: $threadCount)", style = MaterialTheme.typography.labelMedium, color = MatrixGreen)
+                        }
+                    }
+                    Box(modifier = boxMod) {
+                        Column {
+                            Text("RAM LOCK", style = MaterialTheme.typography.labelSmall, color = MatrixGreen.copy(alpha = 0.6f))
+                            val ramUse = deviceInfo?.let { it.totalRamGb - it.availableRamGb } ?: 0.0
+                            Text("${String.format("%.1f", ramUse)} / ${String.format("%.1f", deviceInfo?.totalRamGb ?: 0.0)} GB", style = MaterialTheme.typography.labelMedium, color = MatrixGreen)
+                        }
+                    }
+                    Box(modifier = boxMod) {
+                        Column {
+                            Text("THERMALS", style = MaterialTheme.typography.labelSmall, color = MatrixGreen.copy(alpha = 0.6f))
+                            val temp = deviceInfo?.batteryTempCelsius ?: 0.0
+                            Text("${temp.toInt()}°C", style = MaterialTheme.typography.labelMedium, color = if (temp > 40) AlertRed else MatrixGreen)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
                 Text("REAL-TIME RPC COMPUTE STREAM", style = MaterialTheme.typography.labelSmall, color = MatrixGreen.copy(alpha = 0.5f))
                 
-                Box(modifier = Modifier.weight(1f).padding(top = 16.dp).background(Color.Black).border(1.dp, MatrixGreen.copy(alpha = 0.2f), RoundedCornerShape(8.dp)).padding(12.dp)) {
+                // LOG OUTPUT
+                Box(modifier = Modifier.weight(1f).padding(top = 8.dp).background(Color.Black).border(1.dp, MatrixGreen.copy(alpha = 0.2f), RoundedCornerShape(8.dp)).padding(12.dp)) {
                     androidx.compose.foundation.lazy.LazyColumn(state = scrollState) {
                         items(logs) { log ->
+                            val logLower = log.lowercase()
+                            val logColor = when {
+                                logLower.contains("error") || logLower.contains("fail") || logLower.contains("warning") -> AlertRed
+                                logLower.contains("rpc") -> MaterialTheme.colorScheme.tertiary
+                                logLower.contains("tensor") || logLower.contains("layer") -> MaterialTheme.colorScheme.primary
+                                logLower.contains("t/s") -> MatrixGreen
+                                else -> MatrixGreen.copy(alpha = 0.8f)
+                            }
+                            
                             Text(
                                 text = log,
-                                style = androidx.compose.ui.text.TextStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 11.sp),
-                                color = MatrixGreen,
-                                modifier = Modifier.padding(vertical = 1.dp)
+                                style = androidx.compose.ui.text.TextStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 10.sp),
+                                color = logColor,
+                                modifier = Modifier.padding(vertical = 2.dp)
                             )
                         }
                     }
@@ -2281,7 +2588,7 @@ fun NetworkScannerSheet(onDismiss: () -> Unit, onNodeAttached: (String) -> Unit)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(ip, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
-                                        Text("ACTIVE ON 50052", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
+                                        Text("ACTIVE COMPUTE NODE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
                                     }
                                     HackerButton(
                                         onClick = { onNodeAttached(ip) },

@@ -13,7 +13,8 @@ data class ContextPrompt(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
     val keywords: String,
-    val prompt: String
+    val prompt: String,
+    val wordCount: Int? = null
 )
 
 object ContextProgrammingManager {
@@ -63,17 +64,17 @@ object ContextProgrammingManager {
         }
     }
 
-    fun addOrUpdatePrompt(context: Context, id: String?, title: String, keywords: String, prompt: String) {
+    fun addOrUpdatePrompt(context: Context, id: String?, title: String, keywords: String, prompt: String, wordCount: Int?) {
         val current = _prompts.value.toMutableList()
         if (id != null) {
             val index = current.indexOfFirst { it.id == id }
             if (index != -1) {
-                current[index] = current[index].copy(title = title, keywords = keywords, prompt = prompt)
+                current[index] = current[index].copy(title = title, keywords = keywords, prompt = prompt, wordCount = wordCount)
             } else {
-                current.add(ContextPrompt(title = title, keywords = keywords, prompt = prompt))
+                current.add(ContextPrompt(title = title, keywords = keywords, prompt = prompt, wordCount = wordCount))
             }
         } else {
-            current.add(ContextPrompt(title = title, keywords = keywords, prompt = prompt))
+            current.add(ContextPrompt(title = title, keywords = keywords, prompt = prompt, wordCount = wordCount))
         }
         _prompts.value = current.toList()
         saveToFileAsync(context)
@@ -92,11 +93,18 @@ object ContextProgrammingManager {
             if (p.keywords.isBlank()) continue
             val keywordsList = p.keywords.split(",").map { it.trim() }.filter { it.isNotEmpty() }
             if (keywordsList.any { Regex("\\b$it\\b", RegexOption.IGNORE_CASE).containsMatchIn(query) }) {
-                return p.prompt
+                val base = p.prompt
+                return if (p.wordCount != null && p.wordCount > 0) {
+                    "$base\n\nCRITICAL INSTRUCTION: You MUST limit your response to exactly approximately ${p.wordCount} words."
+                } else base
             }
         }
         // Fallback to default_general
-        return activePrompts.find { it.keywords.isBlank() }?.prompt ?: "Answer accurately using the provided data."
+        val defaultP = activePrompts.find { it.keywords.isBlank() }
+        val base = defaultP?.prompt ?: "Answer accurately using the provided data."
+        return if (defaultP?.wordCount != null && defaultP.wordCount > 0) {
+            "$base\n\nCRITICAL INSTRUCTION: You MUST limit your response to exactly approximately ${defaultP.wordCount} words."
+        } else base
     }
 
     private fun saveToFileAsync(context: Context) {
@@ -110,6 +118,9 @@ object ContextProgrammingManager {
                     obj.put("title", p.title)
                     obj.put("keywords", p.keywords)
                     obj.put("prompt", p.prompt)
+                    if (p.wordCount != null) {
+                        obj.put("wordCount", p.wordCount)
+                    }
                     rootArray.put(obj)
                 }
                 file.writeText(rootArray.toString())
@@ -132,7 +143,8 @@ object ContextProgrammingManager {
                     id = obj.getString("id"),
                     title = obj.getString("title"),
                     keywords = obj.getString("keywords"),
-                    prompt = obj.getString("prompt")
+                    prompt = obj.getString("prompt"),
+                    wordCount = if (obj.has("wordCount")) obj.getInt("wordCount") else null
                 ))
             }
             return result

@@ -22,6 +22,7 @@ object BridgeStateManager {
     val bridgeToken = MutableStateFlow<String>("")
     val threadCount = MutableStateFlow<Int>(4)
     val isLlamaReady = MutableStateFlow<Boolean>(false)
+    val rpcPort = MutableStateFlow<Int>(50052)
     val engineCrashed = MutableStateFlow<Boolean>(false)
     val engineCrashReason = MutableStateFlow<String?>(null)
     val lastPeerIp = MutableStateFlow<String?>(null)
@@ -31,4 +32,9 @@ object BridgeStateManager {
     val trustedMasterIp = MutableStateFlow<String?>(null)
     val workerStatus = MutableStateFlow<String>("Listening") // Listening, Verifying, Connected, Error
     val workerLogs = MutableStateFlow<List<String>>(emptyList())
+    
+    // LAYER DISTRIBUTION
+    val masterComputePercentage = MutableStateFlow<Float?>(null) // No hardcoded default
+    val fullWorkerOffload = MutableStateFlow(false) 
+    val activeModelTotalLayers = MutableStateFlow<Int?>(null) // Nullable if parsing fails
 }

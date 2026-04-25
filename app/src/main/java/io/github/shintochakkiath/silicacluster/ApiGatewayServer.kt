@@ -46,6 +46,9 @@ import kotlinx.coroutines.withContext
 class ApiGatewayServer {
     private var server: ApplicationEngine? = null
     private val httpClient = HttpClient(CIO) {
+        engine {
+            requestTimeout = 0 // Disable engine-level timeout for slow RPC streaming
+        }
         expectSuccess = false
         install(HttpTimeout) {
             requestTimeoutMillis = 600_000L // 10 minutes timeout for heavy distributed distribution
@@ -54,9 +57,10 @@ class ApiGatewayServer {
         }
     }
 
-    private val localLlamaUrl = "http://127.0.0.1:8080"
+    private var targetLlamaUrl = "http://127.0.0.1:8080"
 
-    fun startServer(port: Int = 8081) {
+    fun startServer(port: Int = 8081, upstreamIp: String? = null) {
+        if (upstreamIp != null) targetLlamaUrl = "http://$upstreamIp:8080"
         if (server != null) return
 
         server = embeddedServer(io.ktor.server.cio.CIO, port = port, host = "0.0.0.0") {
@@ -74,7 +78,7 @@ class ApiGatewayServer {
                             return@handle
                         }
 
-                        val targetUrl = "$localLlamaUrl${call.request.uri}"
+                        val targetUrl = "$targetLlamaUrl${call.request.uri}"
                         proxyRequest(call, targetUrl)
                     }
                 }

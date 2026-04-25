@@ -48,6 +48,8 @@ object TelemetryServer {
                         put("cpuCount", info.cpuCount)
                         put("threadCount", BridgeStateManager.threadCount.value)
                         put("batteryTempCelsius", info.batteryTempCelsius)
+                        put("measuredTops", info.measuredTops)
+                        put("rpcPort", BridgeStateManager.rpcPort.value)
                     }
                     call.respondText(json.toString(), io.ktor.http.ContentType.Application.Json)
                 }
@@ -71,6 +73,68 @@ object TelemetryServer {
                         put("masterIp", BridgeStateManager.trustedMasterIp.value ?: "")
                     }
                     call.respondText(json.toString(), io.ktor.http.ContentType.Application.Json)
+                }
+
+                get("/check-model") {
+                    val modelName = call.request.queryParameters["name"] ?: ""
+                    val storageDir = try { context.getExternalFilesDir(null) ?: context.filesDir } catch (e: Exception) { context.filesDir }
+                    val dir = java.io.File(storageDir, "models").apply { mkdirs() }
+                    val exists = java.io.File(dir, modelName).exists()
+                    call.respondText(org.json.JSONObject().apply { put("exists", exists) }.toString(), io.ktor.http.ContentType.Application.Json)
+                }
+
+                post("/upload-model") {
+                    val modelName = call.request.queryParameters["name"] ?: "uploaded_model.gguf"
+                    val storageDir = try { context.getExternalFilesDir(null) ?: context.filesDir } catch (e: Exception) { context.filesDir }
+                    val dir = java.io.File(storageDir, "models").apply { mkdirs() }
+                    val destFile = java.io.File(dir, modelName)
+                    try {
+                        val channel = call.receiveChannel()
+                        val fos = destFile.outputStream()
+                        val buffer = java.nio.ByteBuffer.allocate(8192)
+                        while (!channel.isClosedForRead) {
+                            val read = channel.readAvailable(buffer)
+                            if (read > 0) {
+                                buffer.flip()
+                                val bytes = ByteArray(buffer.remaining())
+                                buffer.get(bytes)
+                                fos.write(bytes)
+                                buffer.clear()
+                            }
+                        }
+                        fos.close()
+                        call.respond(HttpStatusCode.OK, "Uploaded")
+                    } catch (e: Exception) {
+                        destFile.delete()
+                        call.respond(HttpStatusCode.InternalServerError, "Failed to upload")
+                    }
+                }
+
+                post("/start-full-engine") {
+                    val body = call.receiveText()
+                    val json = JSONObject(body)
+                    val modelName = json.optString("modelName", "")
+                    val rpcNodes = json.optString("rpcNodes", "")
+                    val models = ModelDirectory.getModels(context)
+                    val targetModel = models.find { it.name.replace(" ", "_").lowercase() + ".gguf" == modelName || it.name == modelName }
+                    if (targetModel != null) {
+                        val storageDir = try { context.getExternalFilesDir(null) ?: context.filesDir } catch (e: Exception) { context.filesDir }
+                        val dir = java.io.File(storageDir, "models").apply { mkdirs() }
+                        val modelPath = java.io.File(dir, modelName).absolutePath
+                        val intent = android.content.Intent(context, SilicaService::class.java).apply {
+                            action = "START"
+                            putExtra("MODEL_PATH", modelPath)
+                            putExtra("BRIDGE", "Cloudflare_Free")
+                            putExtra("IS_WORKER", false) // run standard libllama.so
+                            putExtra("IS_OFFLINE", true) // skip cloudflare tunnel on worker
+                            putExtra("THREAD_COUNT", BridgeStateManager.threadCount.value)
+                            putExtra("EXTRA_RPC_NODES", rpcNodes)
+                        }
+                        context.startService(intent)
+                        call.respond(HttpStatusCode.OK, "Engine starting on worker")
+                    } else {
+                        call.respond(HttpStatusCode.NotFound, "Model not found")
+                    }
                 }
             }
         }
