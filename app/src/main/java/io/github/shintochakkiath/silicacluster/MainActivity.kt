@@ -1552,6 +1552,48 @@ fun DistributedScreen(
                         }
                     }
                 }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                    Text("SWARM CAPABILITY ASSESSMENT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    Spacer(Modifier.height(8.dp))
+                    
+                    val downloadedModels = remember { ModelDirectory.getModels(context).filter { java.io.File(context.filesDir.absolutePath + "/models/${it.name.replace(" ", "_").lowercase()}.gguf.completed").exists() || java.io.File(context.getExternalFilesDir(null)?.absolutePath + "/models/${it.name.replace(" ", "_").lowercase()}.gguf.completed").exists() } }
+                    var assessmentModel by remember { mutableStateOf(downloadedModels.firstOrNull()) }
+                    var expandedAssessment by remember { mutableStateOf(false) }
+                    
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Target Model: ", style = MaterialTheme.typography.labelSmall)
+                        Box {
+                            TextButton(onClick = { expandedAssessment = true }) {
+                                Text(assessmentModel?.name ?: "Select Downloaded Model", style = MaterialTheme.typography.labelMedium)
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                            }
+                            DropdownMenu(expanded = expandedAssessment, onDismissRequest = { expandedAssessment = false }) {
+                                downloadedModels.forEach { m ->
+                                    DropdownMenuItem(text = { Text(m.name) }, onClick = { assessmentModel = m; expandedAssessment = false })
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (assessmentModel != null) {
+                        val mSizeStr = assessmentModel!!.ramRequired.replace(Regex("[^0-9.]"), "")
+                        val mSize = mSizeStr.toDoubleOrNull() ?: 1.0
+                        
+                        if (totalAvailableRam >= mSize + 0.5) { // 0.5 buffer for KV cache and OS
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MatrixGreen, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("The current split can comfortably handle ${assessmentModel!!.name}. The Swarm capacity has enough computation power and RAM to run this model.", style = MaterialTheme.typography.labelSmall, color = MatrixGreen)
+                            }
+                        } else {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                                Icon(Icons.Default.Warning, contentDescription = null, tint = AlertRed, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("The Swarm capacity currently doesn't have enough computation power and RAM to run ${assessmentModel!!.name} (${mSize}GB required). Please add another worker node.", style = MaterialTheme.typography.labelSmall, color = AlertRed)
+                            }
+                        }
+                    }
+
             }
             Spacer(modifier = Modifier.height(24.dp))
         }
