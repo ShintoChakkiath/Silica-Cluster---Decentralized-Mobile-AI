@@ -1,9 +1,17 @@
 # Silica Cluster-Decentralized Mobile AI 
 <img src = "/logo.png" width = "100" >
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+
+
 SilicaCluster is an open-source (AGPLv3) application designed to turn Android devices into nodes for a decentralized, local AI infrastructure . Built as a true private alternative to centralized AI services, this app allows you to run open-source Large Language Models (LLMs) locally on your phone or distributed across a cluster of devices.
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+
+<p align="center">
+  <a href="https://github.com/ShintoChakkiath/Silica-Cluster-Decentralized-Mobile-AI/releases/download/v1.on.publish/Silica.Cluster.v1.apk">
+    <img src="https://img.shields.io/badge/Download-APK-brightgreen?style=for-the-badge&logo=android" alt="Download APK">
+  </a>
+</p>
 
 Silica Cluster is an Android-based Decentralized Mobile AI application. Its primary goal is to let users run, manage, and distribute Large Language Models (LLMs) entirely on their mobile devices without relying on third-party cloud services.
 
