@@ -7,6 +7,23 @@ SilicaCluster is an open-source (AGPLv3) application designed to turn Android de
 
 Silica Cluster is an Android-based Decentralized Mobile AI application. Its primary goal is to let users run, manage, and distribute Large Language Models (LLMs) entirely on their mobile devices without relying on third-party cloud services.
 
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://youtu.be/3alLPsRKvJM?si=W6gMAo91HiZnTkW-">
+        <img src="https://static.vecteezy.com/system/resources/thumbnails/011/998/173/small_2x/youtube-icon-free-vector.jpg" width="100"><br>
+        <sub><b>Presentation</b></sub>
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://youtu.be/tdAJc6_iAIA?si=suuCA2rxNJ0ZXfeN">
+        <img src="https://static.vecteezy.com/system/resources/thumbnails/011/998/173/small_2x/youtube-icon-free-vector.jpg" width="100"><br>
+        <sub><b>Testing</b></sub>
+      </a>
+    </td>
+  </tr>
+</table>
+
 Here is a breakdown of what it is and what it does, 
 
 1. The Core AI Engine (BinaryRunner.kt & ModelConfig.kt)
