@@ -32,6 +32,9 @@ Silica Cluster is an Android-based Decentralized Mobile AI application. Its prim
   </tr>
 </table>
 
+Product Hunt launch is scheduled for 12:31 PM IST tomorrow, May 1st, 2026. 
+<a href="https://www.producthunt.com/products/silica-cluster?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-silica-cluster" target="_blank" rel="noopener noreferrer"><img alt="Silica Cluster - Decentralized Mobile AI | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1135925&amp;theme=light&amp;t=1777550540504"></a>
+
 <!-- Introduction -->
 <h2>Project Breakdown</h2>
 <p>Here is a detailed breakdown of the system architecture and its core capabilities.</p>
